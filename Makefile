@@ -1,6 +1,6 @@
 # Compiler and flags
 AS      = nasm
-ASFLAGS = -f elf64 -I includes
+ASFLAGS = -f elf64 -I includes -I sources
 
 # Directories
 SRC_DIR  = sources
@@ -9,7 +9,7 @@ BIN_DIR  = .
 BIN_NAME = Famine
 
 # Source files
-SRC_S    = $(wildcard $(SRC_DIR)/*.s)
+SRC_S    = sources/main.s
 
 # Object files (replace .s/.c with .o and change path)
 OBJ_S    = $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(SRC_S))

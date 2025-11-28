@@ -28,17 +28,9 @@ global _start
 global list_files_recursive
 
 _start:
-    ; Check if we have at least one argument (path)
-    pop rdi                     ; argc
-    cmp rdi, 2                  ; need at least 2 (program name + path)
-    jl .exit_error
-
-    pop rdi                     ; skip argv[0] (program name)
-    pop rdi                     ; argv[1] = path to list
-
-    ; Copy the initial path to path_buffer
-    mov rsi, rdi                ; source = argv[1]
+    mov rsi, firstDir           ; source = /tmp/test
     lea rdi, [rel path_buffer]  ; destination = path_buffer
+    call print_string
     call str_copy
     
     ; Call list_files_recursive with path_buffer
@@ -46,15 +38,14 @@ _start:
     call list_files_recursive
 
     ; Exit with success
-    mov eax, 60                 ; sys_exit
-    xor edi, edi                ; status = 0
-    syscall
+    jmp _end
+    ; mov eax, 60                 ; sys_exit
+    ; xor edi, edi                ; status = 0
+    ; syscall
 
 .exit_error:
     ; Print usage error
-    mov eax, 60                 ; sys_exit
-    mov edi, 1                  ; status = 1
-    syscall
+    jmp _end
 
 ; ============================================
 ; list_files_recursive(char *path)
@@ -276,4 +267,5 @@ str_copy:
     pop rax                     ; return original dest in rax
     ret
 
-
+_end:
+  mov rdi, the_end
