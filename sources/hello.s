@@ -13,7 +13,6 @@
 %define O_RDONLY_DIR    O_RDONLY | O_DIRECTORY
 %define DT_DIR          4
 %define DT_REG          8
-%define STDOUT          1
 %define PATH_MAX        4096
 %define STACK_LOCALS    128
 
