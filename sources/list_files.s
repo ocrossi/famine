@@ -10,11 +10,13 @@
 %define AT_FDCWD        -100
 %define O_RDONLY        0
 %define O_DIRECTORY     0x10000
+%define O_RDONLY_DIR    O_RDONLY | O_DIRECTORY
 %define DT_DIR          4
 %define DT_REG          8
 %define STDOUT          1
 %define BUFFER_SIZE     4096
 %define PATH_MAX        4096
+%define STACK_LOCALS    128
 
 section .bss
     path_buffer:    resb PATH_MAX       ; buffer for building full path
@@ -66,8 +68,8 @@ list_files_recursive:
     
     ; Allocate stack space:
     ; - BUFFER_SIZE bytes for dir_buffer
-    ; - 64 bytes for local variables and saved registers
-    sub rsp, BUFFER_SIZE + 128
+    ; - STACK_LOCALS bytes for local variables and saved registers
+    sub rsp, BUFFER_SIZE + STACK_LOCALS
     and rsp, -16                ; Align stack to 16 bytes
 
     ; Stack layout:
@@ -102,7 +104,7 @@ list_files_recursive:
     mov eax, SYS_OPENAT         ; sys_openat
     mov edi, AT_FDCWD           ; AT_FDCWD
     mov rsi, r12                ; pathname
-    mov edx, O_RDONLY | O_DIRECTORY  ; flags
+    mov edx, O_RDONLY_DIR       ; flags: read-only directory
     xor r10d, r10d              ; mode (not used for opening)
     syscall
 
@@ -117,7 +119,7 @@ list_files_recursive:
     ; Call getdents64 - use stack buffer
     mov eax, SYS_GETDENTS64     ; sys_getdents64
     mov edi, r13d               ; fd
-    lea rsi, [rbp - BUFFER_SIZE - 128]   ; buffer on stack
+    lea rsi, [rbp - BUFFER_SIZE - STACK_LOCALS]   ; buffer on stack
     mov edx, BUFFER_SIZE        ; count
     syscall
 
@@ -135,7 +137,7 @@ list_files_recursive:
     jge .read_loop              ; if pos >= nread, read more
 
     ; Get pointer to current dirent (in stack buffer)
-    lea r15, [rbp - BUFFER_SIZE - 128]
+    lea r15, [rbp - BUFFER_SIZE - STACK_LOCALS]
     add r15, rax                ; r15 = dirent pointer
 
     ; Get d_reclen (offset 16, 2 bytes)
@@ -263,7 +265,7 @@ str_len:
 ; rdi = destination
 ; rsi = source
 ; Copies src to dest including null terminator
-; Returns pointer to null terminator in dest
+; Returns original destination pointer
 ; ============================================
 str_copy:
     push rdi
