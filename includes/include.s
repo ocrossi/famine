@@ -34,9 +34,11 @@
 ; %define JMP_OFFSET              jump - main
 ; %define SIGNATURE_SIZE          _end - signature
 %define BUFFER_SIZE     4096
-; %define READ_DIR_BUFF_SIZE      256
-; %define PROCESS_PATH_LEN        100
-; %define PROCESS_STATUS_READ_SIZE 20
+%define READ_DIR_BUFF_SIZE      256
+%define PROCESS_PATH_LEN        100
+%define PROCESS_STATUS_READ_SIZE 20
+%define PATH_BUFF_SIZE  4096
+%define STDOUT          1
 ; %define WAIT_FORK_OPTION 14
 
 
