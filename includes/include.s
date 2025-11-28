@@ -16,6 +16,7 @@
 %define O_WRONLY	1
 %define O_RDWR      2
 %define O_APPEND	    1024
+%define SEEK_SET        0
 %define SEEK_END        2
 %define PROT_READ       1
 %define PROT_WRITE      2

