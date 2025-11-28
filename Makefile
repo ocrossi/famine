@@ -28,7 +28,7 @@ $(OBJ_DIR):
 
 # Link object files into executable
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) $^ -o $@
+	ld $^ -o $@
 
 # Compile .s files to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
