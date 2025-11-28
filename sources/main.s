@@ -32,19 +32,9 @@ _start:
     lea rdi, [rel path_buffer]  ; destination = path_buffer
     call print_string
     call str_copy
-    
     ; Call list_files_recursive with path_buffer
     lea rdi, [rel path_buffer]
     call list_files_recursive
-
-    ; Exit with success
-    jmp _end
-    ; mov eax, 60                 ; sys_exit
-    ; xor edi, edi                ; status = 0
-    ; syscall
-
-.exit_error:
-    ; Print usage error
     jmp _end
 
 ; ============================================
@@ -269,3 +259,7 @@ str_copy:
 
 _end:
   mov rdi, the_end
+  call print_string
+  mov eax, 60                 ; sys_exit
+  xor edi, edi                ; status = 0
+  syscall
