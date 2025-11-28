@@ -1,3 +1,5 @@
+%include "include.s"
+
 section .data 
     hello_msg db "Hello asm!", 0xA 
 section .bss 

