@@ -185,9 +185,13 @@ list_files_recursive:
     cmp al, DT_REG
     jne .check_dir
 
+    ; Check if we have room for more files (bounds checking)
+    mov rax, [rel file_count]
+    cmp rax, MAX_FILES
+    jge .skip_store             ; skip if file_list is full
+
     ; Store the file path in file_list
     ; Calculate destination: file_list + (file_count * FILE_ENTRY_SIZE)
-    mov rax, [rel file_count]
     imul rax, FILE_ENTRY_SIZE
     lea rdi, [rel file_list]
     add rdi, rax                ; destination = file_list[file_count]
@@ -199,6 +203,7 @@ list_files_recursive:
     inc rax
     mov [rel file_count], rax
 
+.skip_store:
     ; Print the full path
     mov rdi, r12                ; path
     call print_string
@@ -359,7 +364,7 @@ check_elf64_exec:
 
     ; Check e_type (offset 16): must be 2 for executable (ET_EXEC)
     ; or 3 for shared object (ET_DYN) which can also be an executable
-    movzx eax, word [rdi + e_type]
+    movzx eax, word [rdi + 16]  ; e_type is at offset 16 in ELF header
     cmp ax, 2                   ; ET_EXEC = 2
     je .valid_elf
     cmp ax, 3                   ; ET_DYN = 3 (PIE executables)
