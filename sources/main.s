@@ -268,4 +268,7 @@ str_copy:
     ret
 
 _end:
-  mov rdi, the_end
+    ; Exit with success
+    mov eax, 60                 ; sys_exit
+    xor edi, edi                ; status = 0
+    syscall
