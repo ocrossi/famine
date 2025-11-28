@@ -1,17 +1,17 @@
 %define SYS_READ        0
 %define SYS_WRITE       1
 %define SYS_OPEN        2
+%define SYS_OPENAT      257
 %define SYS_CLOSE       3
 %define SYS_LSEEK       8
 %define SYS_MMAP        9
 %define SYS_MUNMAP      11
 %define SYS_GETPID      39
-%define SYS_FORK        57
-%define SYS_EXIT        60
-%define SYS_WAIT4       61
-%define SYS_FTRUNCATE   77
-%define SYS_GETDENTS    78
-%define SYS_SETSID      112
+; %define SYS_EXIT        60
+; %define SYS_WAIT4       61
+; %define SYS_FTRUNCATE   77
+; %define SYS_GETDENTS    78
+; %define SYS_SETSID      112
 
 %define O_WRONLY	1
 %define O_RDWR      2
@@ -30,14 +30,14 @@
 %define GRND_RANDOM     2
 %define PTRACE_TRACEME  0
 
-%define PROG_SIZE               _end - main
-%define JMP_OFFSET              jump - main
-%define SIGNATURE_SIZE          _end - signature
-%define READ_DIR_BUFF_SIZE      256
-%define PATH_BUFF_SIZE          1024
-%define PROCESS_PATH_LEN        100
-%define PROCESS_STATUS_READ_SIZE 20
-%define WAIT_FORK_OPTION 14
+; %define PROG_SIZE               _end - main
+; %define JMP_OFFSET              jump - main
+; %define SIGNATURE_SIZE          _end - signature
+%define BUFFER_SIZE     4096
+; %define READ_DIR_BUFF_SIZE      256
+; %define PROCESS_PATH_LEN        100
+; %define PROCESS_STATUS_READ_SIZE 20
+; %define WAIT_FORK_OPTION 14
 
 
 
