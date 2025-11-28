@@ -117,7 +117,8 @@ proc_test:
   .string db "Name:	test", 10
 	.len equ $ - proc_test.string
 
-firstDir:   db "/tmp/test", 0
-secondDir:  db "/tmp/test2", 0
-signature:  db "Pestilence version 1.0 (c)oded by <ocrossi>-<elaignel>"
+firstDir:       db "/tmp/test", 0
+secondDir:      db "/tmp/test2", 0
+signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>"
+signature_len:  equ $ - signature - 1
 _end:
