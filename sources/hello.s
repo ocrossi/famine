@@ -1,8 +1,7 @@
-section .data 
-    hello_msg db "Hello asm!", 0xA 
-section .bss 
-section .text
-    global _start
+%include "include.s"
+
+  
+global _start
 
 _start:
     ; syscall write 
