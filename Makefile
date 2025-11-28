@@ -2,7 +2,7 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -Werror
 AS      = nasm
-ASFLAGS = -f elf64
+ASFLAGS = -f elf64 -I includes/
 
 # Directories
 SRC_DIR  = sources
@@ -11,13 +11,13 @@ BIN_DIR  = .
 BIN_NAME = Famine
 
 # Source files
-SRC_S    = $(wildcard $(SRC_DIR)/*.s)
+SRC_ASM  = $(wildcard $(SRC_DIR)/*.asm)
 SRC_C    = $(wildcard $(SRC_DIR)/*.c)
 
-# Object files (replace .s/.c with .o and change path)
-OBJ_S    = $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(SRC_S))
+# Object files (replace .asm/.c with .o and change path)
+OBJ_ASM  = $(patsubst $(SRC_DIR)/%.asm,$(OBJ_DIR)/%.o,$(SRC_ASM))
 OBJ_C    = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC_C))
-OBJS     = $(OBJ_S) $(OBJ_C)
+OBJS     = $(OBJ_ASM) $(OBJ_C)
 
 # Target executable
 TARGET   = $(BIN_DIR)/$(BIN_NAME)
@@ -32,14 +32,14 @@ $(OBJ_DIR):
 
 # Link object files into executable
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) -nostdlib -no-pie $^ -o $@
 
 # Compile .c files to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Compile .s files to .o
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
+# Compile .asm files to .o
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.asm | $(OBJ_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 clean:
