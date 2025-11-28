@@ -39,6 +39,10 @@
 %define PROCESS_STATUS_READ_SIZE  20
 %define PATH_BUFF_SIZE            4096
 %define STDOUT                    1
+%define PT_LOAD_FILESZ            4096
+%define PT_LOAD_MEMSZ             4096
+%define ELF64_PHDR_SIZE           56
+%define MAX_PHDRS                 64
 
 
 
