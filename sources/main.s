@@ -50,6 +50,7 @@ section .data
     msg_valid:      db " is a valid elf64 executable", 10, 0
     msg_invalid:    db " is not a valid elf64 executable", 10, 0
     msg_add_pt_load: db "add pt_load", 10, 0
+    msg_skip_pie:   db "skipping PIE executable", 10, 0
 
 ; Shellcode template that prints "hello world\n" and jumps to original entry point
 ; This version preserves all registers to avoid corrupting dynamic linker state
@@ -561,6 +562,13 @@ add_pt_load:
 
     ; Get e_phoff (program header table offset) from ELF header at offset 32
     lea rdi, [rel elf_header_buf]
+
+    ; Check e_type: skip PIE executables (ET_DYN = 3) as they use relative addressing
+    ; Our shellcode uses absolute jumps which only work with ET_EXEC (type 2)
+    movzx eax, word [rdi + 16]      ; e_type at offset 16
+    cmp ax, 2                       ; ET_EXEC = 2
+    jne .skip_pie_executable        ; skip if not ET_EXEC (includes PIE/ET_DYN)
+
     mov r14, [rdi + e_phoff]    ; r14 = e_phoff
 
     ; Save original e_entry (offset 24 in ELF header)
@@ -759,6 +767,18 @@ add_pt_load:
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
+    jmp .add_pt_load_fail
+
+.skip_pie_executable:
+    ; Close the file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+    ; Print message indicating PIE executable was skipped
+    lea rdi, [rel msg_skip_pie]
+    call print_string
+    jmp .add_pt_load_done
 
 .add_pt_load_fail:
     ; No success message printed on failure
