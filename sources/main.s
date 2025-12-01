@@ -252,6 +252,10 @@ add_pt_load:
     mov edx, signature_len      ; signature length
     syscall
 
+    ; Check if write succeeded
+    test rax, rax
+    js .add_pt_load_close_fail
+
     ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
