@@ -27,12 +27,15 @@ section .bss
     file_count:     resq 1                    ; number of files stored
     elf_header_buf: resb 64                   ; buffer for reading ELF header
     elf_phdr_buf:   resb ELF64_PHDR_SIZE * MAX_PHDRS  ; buffer for program headers
+    sig_check_buf:  resb BUFFER_SIZE          ; buffer for checking signature
 
 section .data
     newline:        db 10               ; newline character
     msg_valid:      db " is a valid elf64 executable", 10, 0
     msg_invalid:    db " is not a valid elf64 executable", 10, 0
     msg_add_pt_load: db "add pt_load", 10, 0
+    msg_infected:   db "infected file", 10, 0
+    msg_not_infected: db "not infected", 10, 0
 
 section .text
 global _start
@@ -218,6 +221,11 @@ list_files_recursive:
     mov edx, 1
     syscall
     pop rax
+    
+    ; Check if file is infected (contains signature)
+    mov rdi, r12                ; path
+    call check_signature
+    
     jmp .restore_path
 
 .check_dir:
@@ -634,6 +642,218 @@ add_pt_load:
     pop r13
     pop r12
     add rsp, 32                 ; deallocate local variable space
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; ============================================
+; check_signature(char *filepath)
+; rdi = pointer to file path
+; Opens the file, searches for the signature string,
+; prints "infected file" if found, else "not infected"
+; ============================================
+check_signature:
+    push rbp
+    mov rbp, rsp
+    push r12                    ; saved file path
+    push r13                    ; saved file descriptor
+    push r14                    ; saved file size / bytes read
+    push r15                    ; saved current position
+    push rbx                    ; saved for temp use
+
+    mov r12, rdi                ; r12 = file path
+
+    ; Open the file for reading
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    mov rsi, r12                ; pathname
+    xor edx, edx                ; O_RDONLY = 0
+    xor r10d, r10d
+    syscall
+
+    ; Check if open failed
+    test rax, rax
+    js .check_sig_not_infected  ; if fd < 0, treat as not infected
+
+    mov r13, rax                ; r13 = fd
+
+    ; Get file size using lseek
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    xor esi, esi                ; offset = 0
+    mov edx, SEEK_END           ; whence = SEEK_END
+    syscall
+
+    test rax, rax
+    jle .check_sig_close_not_infected  ; if size <= 0 or lseek failed, not infected
+
+    mov r14, rax                ; r14 = file size
+
+    ; Seek back to beginning
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    xor esi, esi                ; offset = 0
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    xor r15, r15                ; r15 = current position in file
+
+.check_sig_read_loop:
+    ; Read a chunk of the file
+    mov eax, SYS_READ
+    mov edi, r13d               ; fd
+    lea rsi, [rel sig_check_buf]
+    mov edx, BUFFER_SIZE        ; read BUFFER_SIZE bytes
+    syscall
+
+    ; Check if read failed or EOF
+    test rax, rax
+    jle .check_sig_close_not_infected  ; if bytes_read <= 0, not found
+
+    mov rbx, rax                ; rbx = bytes_read
+
+    ; Search for signature in the buffer
+    lea rdi, [rel sig_check_buf]  ; buffer to search in
+    mov rsi, rbx                  ; buffer length
+    lea rdx, [rel signature]      ; signature to search for
+    mov rcx, signature_len        ; signature length
+    call search_substring
+
+    ; If found (rax == 1), file is infected
+    test rax, rax
+    jnz .check_sig_close_infected
+
+    ; Calculate overlap for next read (in case signature spans chunks)
+    ; Seek back by (signature_len - 1) bytes to handle boundary cases
+    add r15, rbx                ; update position
+    cmp r15, r14                ; check if we've read the whole file
+    jge .check_sig_close_not_infected
+
+    ; Seek back slightly to handle signatures that span chunk boundaries
+    ; Calculate new position: max(0, r15 - signature_len + 1)
+    mov rsi, r15
+    sub rsi, signature_len      ; go back by signature length
+    add rsi, 1                  ; but keep 1 byte of progress
+    
+    ; Check for negative offset (shouldn't happen but be safe)
+    test rsi, rsi
+    js .check_sig_close_not_infected
+    
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    ; Check if lseek failed
+    test rax, rax
+    js .check_sig_close_not_infected
+
+    mov r15, rax                ; update position to new seek position
+    jmp .check_sig_read_loop
+
+.check_sig_close_infected:
+    ; Close the file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+    ; Print "infected file"
+    lea rdi, [rel msg_infected]
+    call print_string
+    jmp .check_sig_done
+
+.check_sig_close_not_infected:
+    ; Close the file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+.check_sig_not_infected:
+    ; Print "not infected"
+    lea rdi, [rel msg_not_infected]
+    call print_string
+
+.check_sig_done:
+    pop rbx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; ============================================
+; search_substring(char *haystack, size_t haystack_len, char *needle, size_t needle_len)
+; rdi = haystack (buffer to search in)
+; rsi = haystack_len (length of buffer)
+; rdx = needle (string to search for)
+; rcx = needle_len (length of needle)
+; Returns: rax = 1 if found, 0 if not found
+; ============================================
+search_substring:
+    push rbp
+    mov rbp, rsp
+    push r12                    ; haystack
+    push r13                    ; haystack_len
+    push r14                    ; needle
+    push r15                    ; needle_len
+    push rbx                    ; current position
+
+    mov r12, rdi                ; r12 = haystack
+    mov r13, rsi                ; r13 = haystack_len
+    mov r14, rdx                ; r14 = needle
+    mov r15, rcx                ; r15 = needle_len
+
+    ; If needle is longer than haystack, not found
+    cmp r15, r13
+    ja .search_not_found
+
+    xor rbx, rbx                ; rbx = current position in haystack
+
+.search_loop:
+    ; Check if we have enough bytes left
+    mov rax, r13
+    sub rax, rbx                ; bytes remaining
+    cmp rax, r15
+    jb .search_not_found        ; not enough bytes left
+
+    ; Compare needle with current position in haystack
+    lea rdi, [r12 + rbx]        ; current position in haystack
+    mov rsi, r14                ; needle
+    mov rcx, r15                ; needle_len
+    
+    ; Byte-by-byte comparison
+    xor rax, rax                ; match counter
+.compare_loop:
+    cmp rax, r15
+    jge .search_found           ; all bytes matched
+
+    mov r8b, [rdi + rax]        ; byte from haystack
+    mov r9b, [rsi + rax]        ; byte from needle
+    cmp r8b, r9b
+    jne .search_next            ; mismatch, try next position
+
+    inc rax
+    jmp .compare_loop
+
+.search_next:
+    inc rbx                     ; move to next position
+    jmp .search_loop
+
+.search_found:
+    mov rax, 1
+    jmp .search_done
+
+.search_not_found:
+    xor rax, rax
+
+.search_done:
+    pop rbx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
     mov rsp, rbp
     pop rbp
     ret
