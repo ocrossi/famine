@@ -40,10 +40,11 @@
 %define PROCESS_STATUS_READ_SIZE  20
 %define PATH_BUFF_SIZE            4096
 %define STDOUT                    1
-%define PT_LOAD_FILESZ            4096
-%define PT_LOAD_MEMSZ             4096
+%define PT_LOAD_FILESZ            8192            ; Increased to fit virus code
+%define PT_LOAD_MEMSZ             8192            ; Increased to fit virus code
 %define ELF64_PHDR_SIZE           56
 %define MAX_PHDRS                 64
+%define VIRUS_SIZE                8192            ; Size of virus code to copy
 
 
 
