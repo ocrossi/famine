@@ -60,11 +60,11 @@ section .data
 ;   0x18-0x1E: lea rsi, [rel hello_string]
 ;   0x1F-0x23: mov edx, 12
 ;   0x24-0x25: syscall
-;   0x26-0x31: pop r11, r10, r9, r8, rdi, rsi, rdx, rcx, rbx, rax (restore registers)
-;   0x32-0x33: movabs rax prefix
-;   0x34-0x3B: 8-byte immediate (original entry point patched here at 0x34)
-;   0x3C-0x3D: jmp rax
-;   0x3E-0x49: "hello world\n" string
+;   0x26-0x33: pop r11, r10, r9, r8, rdi, rsi, rdx, rcx, rbx, rax (restore registers)
+;   0x34-0x35: movabs rax prefix (48 B8)
+;   0x36-0x3D: 8-byte immediate (original entry point patched here at offset 0x36)
+;   0x3E-0x3F: jmp rax (FF E0)
+;   0x40-0x4B: "hello world\n" string
 shellcode_template:
     ; Save all registers that the dynamic linker might use
     db 0x50                                  ; push rax
@@ -94,7 +94,7 @@ shellcode_template:
     db 0x59                                  ; pop rcx
     db 0x5B                                  ; pop rbx
     db 0x58                                  ; pop rax
-    ; Jump to original entry point (address patched at offset 0x34)
+    ; Jump to original entry point (address patched at offset 0x36, after the 2-byte opcode)
     db 0x48, 0xB8                            ; movabs rax, <8-byte immediate follows>
     db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  ; placeholder for original entry point
     db 0xFF, 0xE0                            ; jmp rax
