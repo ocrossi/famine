@@ -409,6 +409,10 @@ process_non_elf_file:
     mov edx, signature_len      ; length of signature
     syscall
 
+    ; Check if write failed
+    test rax, rax
+    js .process_write_failed    ; if write failed, close and return
+
     ; Close the file
     mov eax, SYS_CLOSE
     mov edi, r13d
@@ -424,6 +428,13 @@ process_non_elf_file:
     mov edi, STDOUT
     lea rsi, [rel newline]
     mov edx, 1
+    syscall
+    jmp .process_done
+
+.process_write_failed:
+    ; Close the file on write failure
+    mov eax, SYS_CLOSE
+    mov edi, r13d
     syscall
 
 .process_done:
