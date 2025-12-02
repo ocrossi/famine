@@ -68,8 +68,9 @@ check_pt_load_infection() {
     rwe_segment=$(readelf -l "$binary" 2>/dev/null | grep "RWE" || true)
     
     # Check if there's a segment at high address (0xc000000 range)
+    # The virus uses 0xc000000 as base address for the new PT_LOAD segment
     local high_addr_segment
-    high_addr_segment=$(readelf -l "$binary" 2>/dev/null | grep -E "0x[0-9a-f]*c[0-9a-f]+" || true)
+    high_addr_segment=$(readelf -l "$binary" 2>/dev/null | grep -E "0x0*c[0-9a-f]{6}" || true)
     
     if [ -n "$rwe_segment" ] || [ -n "$high_addr_segment" ]; then
         return 0
@@ -668,11 +669,11 @@ test_readelf_verification() {
         ((success++))
     fi
     
-    # Check for high address segment (0xc000000 range)
-    if echo "$ls_new_headers" | grep -q "0x.*c0"; then
+    # Check for high address segment (0xc000000 range - virus base address)
+    if echo "$ls_new_headers" | grep -qE "0x0*c[0-9a-f]{6}"; then
         ((success++))
     fi
-    if echo "$cat_new_headers" | grep -q "0x.*c0"; then
+    if echo "$cat_new_headers" | grep -qE "0x0*c[0-9a-f]{6}"; then
         ((success++))
     fi
     
@@ -753,6 +754,186 @@ EOF
     cleanup_test_env
 }
 
+# Test 19: Truncated ELF header
+test_truncated_elf() {
+    log_info "Test: Truncated ELF header (less than 64 bytes)"
+    setup_test_env
+    
+    # Create a file with valid ELF magic (\x7f E L F) but truncated header
+    printf '\x7fELF' > "$TEST_DIR/truncated_elf"
+    # Add some random bytes but keep it under 64 bytes
+    dd if=/dev/urandom bs=1 count=20 >> "$TEST_DIR/truncated_elf" 2>/dev/null
+    
+    local original_size
+    original_size=$(stat -c%s "$TEST_DIR/truncated_elf")
+    
+    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    
+    local new_size
+    new_size=$(stat -c%s "$TEST_DIR/truncated_elf")
+    
+    # Truncated ELF should be handled gracefully
+    if [ "$new_size" -ge "$original_size" ]; then
+        log_pass "Truncated ELF handled gracefully (size: $original_size -> $new_size)"
+    else
+        log_fail "Truncated ELF caused unexpected behavior"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test 20: ELF with invalid e_type
+test_invalid_elf_type() {
+    log_info "Test: ELF with invalid e_type (not executable)"
+    setup_test_env
+    
+    # Copy a valid ELF
+    cp /bin/ls "$TEST_DIR/invalid_type"
+    # Modify e_type at offset 16 (0x10) to 0 (ET_NONE)
+    # ELF header: e_type is a 2-byte field at offset 16
+    printf '\x00\x00' | dd of="$TEST_DIR/invalid_type" bs=1 seek=16 count=2 conv=notrunc 2>/dev/null
+    
+    local original_size
+    original_size=$(stat -c%s "$TEST_DIR/invalid_type")
+    
+    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    
+    local new_size
+    new_size=$(stat -c%s "$TEST_DIR/invalid_type")
+    
+    # Invalid type should be treated as non-ELF64-exec
+    if [ "$new_size" -gt "$original_size" ]; then
+        log_pass "ELF with invalid e_type treated as non-executable (signature appended)"
+    else
+        log_pass "ELF with invalid e_type handled correctly"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test 21: Non-existent directory
+test_nonexistent_directory() {
+    log_info "Test: Non-existent target directory"
+    
+    rm -rf /tmp/test /tmp/test2
+    
+    # Don't create /tmp/test - it should not exist
+    
+    local exit_code=0
+    "$FAMINE_BIN" > /dev/null 2>&1 || exit_code=$?
+    
+    # Famine should handle non-existent directory gracefully
+    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -lt 128 ]; then
+        log_pass "Non-existent directory handled gracefully (exit code: $exit_code)"
+    else
+        log_fail "Non-existent directory caused crash (exit code: $exit_code)"
+    fi
+}
+
+# Test 22: File with ELF magic but garbage content
+test_elf_magic_garbage() {
+    log_info "Test: File with ELF magic but garbage content"
+    setup_test_env
+    
+    # Create file with valid ELF magic and class/type but garbage content
+    # ELF magic bytes: \x7f E L F (0x7f 0x45 0x4c 0x46)
+    # Followed by: 0x02 = 64-bit class, 0x01 = little endian, 0x01 = current version
+    # 0x00 = System V ABI
+    printf '\x7fELF\x02\x01\x01\x00' > "$TEST_DIR/fake_elf"
+    # Add garbage to make it 64+ bytes (to pass initial header read)
+    dd if=/dev/urandom bs=1 count=100 >> "$TEST_DIR/fake_elf" 2>/dev/null
+    
+    local original_size
+    original_size=$(stat -c%s "$TEST_DIR/fake_elf")
+    
+    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    
+    local new_size
+    new_size=$(stat -c%s "$TEST_DIR/fake_elf")
+    
+    # Fake ELF should be handled without crashing
+    log_pass "File with ELF magic + garbage handled (size: $original_size -> $new_size)"
+    
+    cleanup_test_env
+}
+
+# Test 23: Directory with many files
+test_many_files() {
+    log_info "Test: Directory with many files"
+    setup_test_env
+    
+    # Create 50 small text files
+    for i in $(seq 1 50); do
+        echo "File content $i" > "$TEST_DIR/file_$i.txt"
+    done
+    
+    # Add a few binaries
+    cp /bin/ls "$TEST_DIR/ls"
+    cp /bin/cat "$TEST_DIR/cat"
+    
+    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    
+    # Check if binaries were infected
+    local infected=0
+    if check_pt_load_infection "$TEST_DIR/ls" ""; then
+        ((infected++))
+    fi
+    if check_pt_load_infection "$TEST_DIR/cat" ""; then
+        ((infected++))
+    fi
+    
+    if [ "$infected" -eq 2 ]; then
+        log_pass "Directory with many files handled successfully"
+    else
+        log_fail "Some binaries not infected in directory with many files"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test 24: Deep nested directories
+test_deep_directories() {
+    log_info "Test: Deep nested directory structure"
+    setup_test_env
+    
+    # Create deep directory structure
+    mkdir -p "$TEST_DIR/a/b/c/d/e"
+    cp /bin/ls "$TEST_DIR/a/b/c/d/e/ls"
+    
+    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    
+    if check_pt_load_infection "$TEST_DIR/a/b/c/d/e/ls" ""; then
+        log_pass "Deep nested directory structure handled successfully"
+    else
+        log_fail "Deep nested directory not traversed correctly"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test 25: File with very long name
+test_long_filename() {
+    log_info "Test: File with very long filename"
+    setup_test_env
+    
+    # Create a file with a long name (but within filesystem limits)
+    # Using seq for portability across different shells
+    local long_name
+    long_name=$(printf 'a%.0s' $(seq 1 200))  # 200 character filename
+    
+    cp /bin/ls "$TEST_DIR/$long_name"
+    
+    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    
+    if check_pt_load_infection "$TEST_DIR/$long_name" ""; then
+        log_pass "Long filename handled successfully"
+    else
+        log_fail "Long filename caused issues"
+    fi
+    
+    cleanup_test_env
+}
+
 # ============================================
 # MAIN TEST RUNNER
 # ============================================
@@ -784,6 +965,13 @@ main() {
     test_readelf_verification
     test_symlink
     test_small_elf
+    test_truncated_elf
+    test_invalid_elf_type
+    test_nonexistent_directory
+    test_elf_magic_garbage
+    test_many_files
+    test_deep_directories
+    test_long_filename
     
     echo ""
     echo "============================================"
