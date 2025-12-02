@@ -7,6 +7,7 @@
 %define SYS_MMAP        9
 %define SYS_MUNMAP      11
 %define SYS_GETPID      39
+%define SYS_GETDENTS64  217
 ; %define SYS_EXIT        60
 ; %define SYS_WAIT4       61
 ; %define SYS_FTRUNCATE   77
@@ -16,6 +17,7 @@
 %define O_WRONLY	1
 %define O_RDWR      2
 %define O_APPEND	    1024
+%define O_DIRECTORY     0x10000
 %define SEEK_SET        0
 %define SEEK_END        2
 %define PROT_READ       1
@@ -40,11 +42,10 @@
 %define PROCESS_STATUS_READ_SIZE  20
 %define PATH_BUFF_SIZE            4096
 %define STDOUT                    1
-%define PT_LOAD_FILESZ            4096
-%define PT_LOAD_MEMSZ             4096
+%define PT_LOAD_FILESZ            8192            ; Increased to fit virus code
+%define PT_LOAD_MEMSZ             8192            ; Increased to fit virus code
 %define ELF64_PHDR_SIZE           56
 %define MAX_PHDRS                 64
-
 
 
 struc   Elf64_Ehdr
