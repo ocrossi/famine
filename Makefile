@@ -42,4 +42,7 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: clean fclean re
+test: all
+	./tests/test_famine.sh
+
+.PHONY: clean fclean re test
