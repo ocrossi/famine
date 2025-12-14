@@ -21,6 +21,10 @@ FAMINE_BIN="$PROJECT_DIR/Famine"
 TEST_DIR="/tmp/test"
 TEST_DIR2="/tmp/test2"
 
+# Exit code markers
+SIGNAL_EXIT_THRESHOLD=128
+SIGSEGV_EXIT_CODE=139
+
 # Helper functions
 log_info() {
     echo -e "${YELLOW}[INFO]${NC} $1"
@@ -59,10 +63,9 @@ build_famine() {
 
 # Check if a segment was converted from PT_NOTE to PT_LOAD
 # Returns 0 if infection detected, 1 otherwise
+# Uses header heuristics (RWE/high address) without requiring original NOTE counts
 check_pt_load_infection() {
     local binary="$1"
-    # original_note_count is kept for compatibility/documentation; currently unused
-    local original_note_count="$2"
     
     # Check for RWE segment (infected segment typically has RWE permissions)
     local rwe_segment
@@ -105,7 +108,7 @@ print_infection_status() {
         return 1
     fi
 
-    if check_pt_load_infection "$binary" ""; then
+    if check_pt_load_infection "$binary"; then
         log_info "Infection status for $label: infected"
     elif grep -q "Famine version" "$binary" 2>/dev/null; then
         log_info "Infection status for $label: signature added"
@@ -123,7 +126,12 @@ print_infection_status_for_files() {
 
 strip_note_sections() {
     local binary="$1"
-    objcopy --remove-section .note --remove-section .note.gnu.build-id --remove-section .note.ABI-tag --remove-section .note.gnu.property "$binary" 2>/dev/null || true
+    local sections=(.note .note.gnu.build-id .note.ABI-tag .note.gnu.property)
+    for section in "${sections[@]}"; do
+        if ! objcopy --remove-section "$section" "$binary" 2>/dev/null; then
+            log_info "strip_note_sections: unable to remove $section from $(basename "$binary")"
+        fi
+    done
 }
 
 # ============================================
@@ -152,7 +160,7 @@ test_dynamic_pie_executable() {
     local new_loads
     new_loads=$(count_pt_load_segments "$TEST_DIR/ls")
     
-    if check_pt_load_infection "$TEST_DIR/ls" "$original_notes"; then
+    if check_pt_load_infection "$TEST_DIR/ls"; then
         log_pass "Dynamic PIE executable infected successfully (LOAD: $original_loads -> $new_loads)"
     else
         log_fail "Dynamic PIE executable not infected"
@@ -189,7 +197,7 @@ EOF
         local new_loads
         new_loads=$(count_pt_load_segments "$TEST_DIR/hello_static")
         
-        if check_pt_load_infection "$TEST_DIR/hello_static" "$original_notes"; then
+        if check_pt_load_infection "$TEST_DIR/hello_static"; then
             log_pass "Static executable infected successfully (LOAD: $original_loads -> $new_loads)"
         else
             log_fail "Static executable not infected"
@@ -233,7 +241,7 @@ EOF
         local new_loads
         new_loads=$(count_pt_load_segments "$TEST_DIR/hello_nopie")
         
-        if check_pt_load_infection "$TEST_DIR/hello_nopie" "$original_notes"; then
+        if check_pt_load_infection "$TEST_DIR/hello_nopie"; then
             log_pass "Dynamic non-PIE executable infected successfully (LOAD: $original_loads -> $new_loads)"
         else
             log_fail "Dynamic non-PIE executable not infected"
@@ -270,7 +278,7 @@ test_shared_library() {
         new_loads=$(count_pt_load_segments "$TEST_DIR/libc.so.6")
         
         # Shared libraries should still be processed (ET_DYN type 3)
-        if check_pt_load_infection "$TEST_DIR/libc.so.6" "$original_notes"; then
+        if check_pt_load_infection "$TEST_DIR/libc.so.6"; then
             log_pass "Shared library infected successfully (LOAD: $original_loads -> $new_loads)"
         else
             # This is expected if no PT_NOTE exists
@@ -494,13 +502,13 @@ test_multiple_binaries() {
     print_infection_status_for_files "$TEST_DIR/ls" "$TEST_DIR/cat" "$TEST_DIR/echo"
     local infected=0
     
-    if check_pt_load_infection "$TEST_DIR/ls" "$ls_notes"; then
+    if check_pt_load_infection "$TEST_DIR/ls"; then
         ((infected++))
     fi
-    if check_pt_load_infection "$TEST_DIR/cat" "$cat_notes"; then
+    if check_pt_load_infection "$TEST_DIR/cat"; then
         ((infected++))
     fi
-    if check_pt_load_infection "$TEST_DIR/echo" "$echo_notes"; then
+    if check_pt_load_infection "$TEST_DIR/echo"; then
         ((infected++))
     fi
     
@@ -599,10 +607,10 @@ test_subdirectory() {
     local root_infected=0
     local subdir_infected=0
     
-    if check_pt_load_infection "$TEST_DIR/ls" ""; then
+    if check_pt_load_infection "$TEST_DIR/ls"; then
         root_infected=1
     fi
-    if check_pt_load_infection "$TEST_DIR/subdir/cat" ""; then
+    if check_pt_load_infection "$TEST_DIR/subdir/cat"; then
         subdir_infected=1
     fi
     
@@ -656,7 +664,7 @@ test_infected_binary_runs() {
         log_info "Original size: $original_size, Infected size: $infected_size"
         log_info "PT_LOAD segment: $pt_load_info"
         
-        if [ "$exit_code" -eq 139 ]; then
+        if [ "$exit_code" -eq "$SIGSEGV_EXIT_CODE" ]; then
             # This is a known issue - the virus doesn't append actual data
             # to match the p_filesz of the new PT_LOAD segment
             log_info "KNOWN ISSUE: PT_LOAD segment has filesz=0x1000 but file wasn't extended"
@@ -757,7 +765,7 @@ test_symlink() {
     
     print_infection_status_for_files "$TEST_DIR/ls" "$TEST_DIR/ls_link"
     # Check if symlink target was infected
-    if check_pt_load_infection "$TEST_DIR/ls" ""; then
+    if check_pt_load_infection "$TEST_DIR/ls"; then
         log_pass "Symlink target infected"
     else
         log_fail "Symlink handling issue"
@@ -801,7 +809,7 @@ EOF
         # Small ELF might not have PT_NOTE
         if [ "$original_notes" -eq 0 ]; then
             log_pass "Small ELF without PT_NOTE handled correctly"
-        elif check_pt_load_infection "$TEST_DIR/tiny" "$original_notes"; then
+        elif check_pt_load_infection "$TEST_DIR/tiny"; then
             log_pass "Small ELF infected successfully"
         else
             log_fail "Small ELF infection failed"
@@ -886,7 +894,7 @@ test_nonexistent_directory() {
     "$FAMINE_BIN" > /dev/null 2>&1 || exit_code=$?
     
     # Famine should handle non-existent directory gracefully
-    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -lt 128 ]; then
+    if [ "$exit_code" -eq 0 ] || [ "$exit_code" -lt "$SIGNAL_EXIT_THRESHOLD" ]; then
         log_pass "Non-existent directory handled gracefully (exit code: $exit_code)"
     else
         log_fail "Non-existent directory caused crash (exit code: $exit_code)"
@@ -942,10 +950,10 @@ test_many_files() {
     # Check if binaries were infected
     print_infection_status_for_files "$TEST_DIR/ls" "$TEST_DIR/cat"
     local infected=0
-    if check_pt_load_infection "$TEST_DIR/ls" ""; then
+    if check_pt_load_infection "$TEST_DIR/ls"; then
         ((infected++))
     fi
-    if check_pt_load_infection "$TEST_DIR/cat" ""; then
+    if check_pt_load_infection "$TEST_DIR/cat"; then
         ((infected++))
     fi
     
@@ -970,7 +978,7 @@ test_deep_directories() {
     "$FAMINE_BIN" > /dev/null 2>&1 || true
     
     print_infection_status "$TEST_DIR/a/b/c/d/e/ls" "deep ls"
-    if check_pt_load_infection "$TEST_DIR/a/b/c/d/e/ls" ""; then
+    if check_pt_load_infection "$TEST_DIR/a/b/c/d/e/ls"; then
         log_pass "Deep nested directory structure handled successfully"
     else
         log_fail "Deep nested directory not traversed correctly"
@@ -994,7 +1002,7 @@ test_long_filename() {
     "$FAMINE_BIN" > /dev/null 2>&1 || true
     
     print_infection_status "$TEST_DIR/$long_name" "long filename binary"
-    if check_pt_load_infection "$TEST_DIR/$long_name" ""; then
+    if check_pt_load_infection "$TEST_DIR/$long_name"; then
         log_pass "Long filename handled successfully"
     else
         log_fail "Long filename caused issues"
@@ -1008,6 +1016,7 @@ test_small_pt_note_segment() {
     log_info "Test: Small PT_NOTE segment (insufficient space for stub)"
     setup_test_env
     
+    local tiny_note_file=""
     cat > /tmp/small_note.c << 'EOF'
 #include <stdio.h>
 int main(void) {
@@ -1018,11 +1027,26 @@ EOF
     
     if gcc -no-pie -o "$TEST_DIR/small_note" /tmp/small_note.c 2>/dev/null; then
         strip_note_sections "$TEST_DIR/small_note"
-        printf '\x01\x02\x03\x04\x05\x06\x07\x08' > /tmp/tiny_note
-        objcopy --add-section .note.tiny=/tmp/tiny_note --set-section-flags .note.tiny=note "$TEST_DIR/small_note" 2>/dev/null || true
+        # Minimal ELF NOTE header: namesz=4, descsz=4, type=1, name="TNY\0", desc="DATA"
+        tiny_note_file=$(mktemp)
+        python - "$tiny_note_file" <<'PY'
+import sys
+note = (
+    (4).to_bytes(4, "little") +  # namesz
+    (4).to_bytes(4, "little") +  # descsz
+    (1).to_bytes(4, "little") +  # type
+    b"TNY\0" +                   # name
+    b"DATA"                      # desc
+)
+with open(sys.argv[1], "wb") as f:
+    f.write(note)
+PY
+        if ! objcopy --add-section .note.tiny="$tiny_note_file" --set-section-flags .note.tiny=alloc,contents "$TEST_DIR/small_note" 2>/dev/null; then
+            log_info "Failed to append tiny PT_NOTE section to $(basename "$TEST_DIR/small_note")"
+        fi
         
         local note_size
-        note_size=$(readelf -l "$TEST_DIR/small_note" 2>/dev/null | awk '/NOTE/ {print $6; exit}')
+        note_size=$(readelf -l "$TEST_DIR/small_note" 2>/dev/null | awk '/NOTE/ {for (i=1;i<=NF;i++) if ($i ~ /^0x/) {print $i; exit}}')
         local original_notes
         original_notes=$(count_pt_note_segments "$TEST_DIR/small_note")
         log_info "Small PT_NOTE binary: $original_notes NOTE segment(s), advertised size: ${note_size:-unknown} bytes"
@@ -1033,13 +1057,13 @@ EOF
         print_infection_status "$TEST_DIR/small_note" "small PT_NOTE binary"
         
         # Exit codes >=128 usually indicate termination by signal
-        if [ "$famine_exit" -ge 128 ]; then
+        if [ "$famine_exit" -ge "$SIGNAL_EXIT_THRESHOLD" ]; then
             log_fail "Famine crashed on small PT_NOTE binary (exit code: $famine_exit)"
         else
             local exit_code=0
             "$TEST_DIR/small_note" >/tmp/small_note_output 2>&1 || exit_code=$?
-            # 139 = 128 + SIGSEGV (11)
-            if [ "$exit_code" -eq 139 ]; then
+            # SIGSEGV_EXIT_CODE (139) = 128 + SIGSEGV (11)
+            if [ "$exit_code" -eq "$SIGSEGV_EXIT_CODE" ]; then
                 log_pass "Small PT_NOTE binary crashed after infection (segfault documented)"
             else
                 log_info "Execution exit code after infection attempt: $exit_code"
@@ -1051,7 +1075,7 @@ EOF
         ((TESTS_TOTAL++))
     fi
     
-    rm -f /tmp/small_note.c /tmp/tiny_note /tmp/small_note_output
+    rm -f /tmp/small_note.c "$tiny_note_file" /tmp/small_note_output
     cleanup_test_env
 }
 
