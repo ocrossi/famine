@@ -61,6 +61,7 @@ build_famine() {
 # Returns 0 if infection detected, 1 otherwise
 check_pt_load_infection() {
     local binary="$1"
+    # original_note_count is kept for compatibility/documentation; currently unused
     local original_note_count="$2"
     
     # Check for RWE segment (infected segment typically has RWE permissions)
@@ -118,6 +119,11 @@ print_infection_status_for_files() {
         [ -z "$target" ] && continue
         print_infection_status "$target"
     done
+}
+
+strip_note_sections() {
+    local binary="$1"
+    objcopy --remove-section .note --remove-section .note.gnu.build-id --remove-section .note.ABI-tag --remove-section .note.gnu.property "$binary" 2>/dev/null || true
 }
 
 # ============================================
@@ -307,7 +313,7 @@ EOF
 int main(void) { return 0; }
 EOF
         if gcc -no-pie -o "$binary" /tmp/note_free.c 2>/dev/null; then
-            objcopy --remove-section .note --remove-section .note.gnu.build-id --remove-section .note.ABI-tag --remove-section .note.gnu.property "$binary" 2>/dev/null || true
+            strip_note_sections "$binary"
             built=1
         fi
     fi
@@ -1011,7 +1017,7 @@ int main(void) {
 EOF
     
     if gcc -no-pie -o "$TEST_DIR/small_note" /tmp/small_note.c 2>/dev/null; then
-        objcopy --remove-section .note --remove-section .note.gnu.build-id --remove-section .note.ABI-tag --remove-section .note.gnu.property "$TEST_DIR/small_note" 2>/dev/null || true
+        strip_note_sections "$TEST_DIR/small_note"
         printf '\x01\x02\x03\x04\x05\x06\x07\x08' > /tmp/tiny_note
         objcopy --add-section .note.tiny=/tmp/tiny_note --set-section-flags .note.tiny=note "$TEST_DIR/small_note" 2>/dev/null || true
         
@@ -1026,11 +1032,13 @@ EOF
         
         print_infection_status "$TEST_DIR/small_note" "small PT_NOTE binary"
         
+        # Exit codes >=128 usually indicate termination by signal
         if [ "$famine_exit" -ge 128 ]; then
             log_fail "Famine crashed on small PT_NOTE binary (exit code: $famine_exit)"
         else
             local exit_code=0
             "$TEST_DIR/small_note" >/tmp/small_note_output 2>&1 || exit_code=$?
+            # 139 = 128 + SIGSEGV (11)
             if [ "$exit_code" -eq 139 ]; then
                 log_pass "Small PT_NOTE binary crashed after infection (segfault documented)"
             else
