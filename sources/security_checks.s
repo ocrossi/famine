@@ -61,7 +61,7 @@ check_debugger:
 check_process_running:
     push rbp
     mov rbp, rsp
-    sub rsp, 4352               ; Stack space for buffers
+    sub rsp, PROC_CHECK_STACK_SIZE  ; Stack space for buffers
     push r12                    ; fd for /proc
     push r13                    ; current position
     push r14                    ; bytes read
@@ -175,7 +175,7 @@ check_process_running:
     ; Compare with "test"
     lea rdi, [rbp-4300]
     lea rsi, [rel sec_test_proc_name]
-    mov rcx, 4                  ; length of "test"
+    mov rcx, TEST_PROC_NAME_LEN ; length of "test"
     call str_compare_n
     test rax, rax
     jnz .test_process_found
@@ -210,7 +210,7 @@ check_process_running:
     pop r14
     pop r13
     pop r12
-    add rsp, 4352
+    add rsp, PROC_CHECK_STACK_SIZE
     mov rsp, rbp
     pop rbp
     ret
@@ -219,6 +219,9 @@ check_process_running:
 ; Helper: is_numeric - Check if string is numeric
 ; rsi = string pointer
 ; Returns: rax = 1 if numeric, 0 if not
+; Note: Only checks first character for performance.
+; This is sufficient for /proc entries since non-PID
+; entries (like "cpuinfo", "meminfo") start with letters.
 ; ============================================
 is_numeric:
     push rsi

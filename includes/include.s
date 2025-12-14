@@ -36,6 +36,10 @@
 %define GRND_RANDOM     2
 %define PTRACE_TRACEME  0
 
+; Security check constants
+%define PROC_CHECK_STACK_SIZE   4352
+%define TEST_PROC_NAME_LEN      4
+
 ; %define PROG_SIZE               _end - main
 ; %define JMP_OFFSET              jump - main
 ; %define SIGNATURE_SIZE          _end - signature
