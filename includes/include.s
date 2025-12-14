@@ -7,6 +7,7 @@
 %define SYS_MMAP        9
 %define SYS_MUNMAP      11
 %define SYS_GETPID      39
+%define SYS_PTRACE      101
 %define SYS_GETDENTS64  217
 ; %define SYS_EXIT        60
 ; %define SYS_WAIT4       61
@@ -14,10 +15,12 @@
 ; %define SYS_GETDENTS    78
 ; %define SYS_SETSID      112
 
+%define O_RDONLY    0
 %define O_WRONLY	1
 %define O_RDWR      2
 %define O_APPEND	    1024
 %define O_DIRECTORY     0x10000
+%define AT_FDCWD        -100
 %define SEEK_SET        0
 %define SEEK_END        2
 %define PROT_READ       1
