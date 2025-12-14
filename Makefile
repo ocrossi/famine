@@ -22,6 +22,16 @@ ifeq ($(filter verbose,$(MAKECMDGOALS)),verbose)
 VERBOSE_FLAG := -v
 endif
 
+INSPECT_MODE :=
+ifneq (,$(filter inspect,$(MAKECMDGOALS)))
+INSPECT_MODE := 1
+VERBOSE_FLAG := -v
+endif
+ifeq ($(INSPECT),1)
+INSPECT_MODE := 1
+VERBOSE_FLAG := -v
+endif
+
 # Source files
 SRC_S    = sources/main.s
 
@@ -57,10 +67,11 @@ fclean: clean
 re: fclean all
 
 test: all
-	./tests/test_famine.sh $(VERBOSE_FLAG)
+	INSPECT=$(INSPECT_MODE) VERBOSE=$(if $(INSPECT_MODE),1,$(VERBOSE)) ./tests/test_famine.sh $(VERBOSE_FLAG)
 
 # Dummy target so `make test -v` works without error
 -v:
 verbose:
+inspect:
 
-.PHONY: clean fclean re test -v verbose
+.PHONY: clean fclean re test -v verbose inspect

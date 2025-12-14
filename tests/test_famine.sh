@@ -26,6 +26,7 @@ LOG_DIR="$PROJECT_DIR/logs"
 SIGNAL_EXIT_THRESHOLD=128
 SIGSEGV_EXIT_CODE=139
 VERBOSE=${VERBOSE:-0}
+INSPECT=${INSPECT:-0}
 
 while getopts "v" opt; do
     case "$opt" in
@@ -41,6 +42,13 @@ fi
 if [ "$VERBOSE" -eq 1 ]; then
     mkdir -p "$LOG_DIR"
 fi
+if [ "$INSPECT" -eq 1 ] && [ "$VERBOSE" -eq 0 ]; then
+    VERBOSE=1
+    mkdir -p "$LOG_DIR"
+fi
+
+CURRENT_TEST_CONCLUSION=""
+CURRENT_TEST_STATUS=""
 
 # Helper functions
 log_info() {
@@ -51,12 +59,16 @@ log_pass() {
     echo -e "${GREEN}[PASS]${NC} $1"
     ((TESTS_PASSED++))
     ((TESTS_TOTAL++))
+    CURRENT_TEST_STATUS="success"
+    CURRENT_TEST_CONCLUSION="$1"
 }
 
 log_fail() {
     echo -e "${RED}[FAIL]${NC} $1"
     ((TESTS_FAILED++))
     ((TESTS_TOTAL++))
+    CURRENT_TEST_STATUS="failure"
+    CURRENT_TEST_CONCLUSION="$1"
 }
 
 setup_test_env() {
@@ -160,8 +172,97 @@ dump_readelf_if_verbose() {
             echo "--- readelf -l ($phase) $(basename "$target") ---"
             readelf -l "$target" || true
             echo "--- end ---"
-        } | if [ -n "${LOG_CURRENT:-}" ]; then tee -a "$LOG_CURRENT"; else cat; fi
+        } | if [ "$INSPECT" -eq 1 ]; then cat; elif [ -n "${LOG_CURRENT:-}" ]; then tee -a "$LOG_CURRENT"; else cat; fi
     done
+}
+
+inspect_test_description() {
+    case "$1" in
+        test_dynamic_pie_executable) echo "Infect a dynamically linked PIE binary copied from /bin/ls."; return;;
+        test_static_executable) echo "Build and infect a statically linked binary compiled from /tmp/hello.c."; return;;
+        test_dynamic_non_pie) echo "Build and infect a non-PIE dynamically linked binary."; return;;
+        test_shared_library) echo "Attempt infection of a shared library (libc.so.6)."; return;;
+        test_no_pt_note) echo "Handle binaries that lack PT_NOTE program headers."; return;;
+        test_already_infected) echo "Observe behaviour when running Famine multiple times on the same binary."; return;;
+        test_non_elf_text_file) echo "Ensure non-ELF text files receive only the signature."; return;;
+        test_empty_file) echo "Handle empty files without crashing."; return;;
+        test_binary_garbage) echo "Process random binary data treated as non-ELF."; return;;
+        test_multiple_binaries) echo "Infect several binaries in a single directory."; return;;
+        test_corrupted_elf_magic) echo "Handle binaries with corrupted ELF magic bytes."; return;;
+        test_32bit_elf) echo "Skip infection of 32-bit ELF binaries."; return;;
+        test_subdirectory) echo "Recurse into subdirectories and infect binaries."; return;;
+        test_infected_binary_runs) echo "Check execution of an infected binary."; return;;
+        test_readonly_file) echo "Respect read-only permissions on binaries."; return;;
+        test_readelf_verification) echo "Inspect readelf output for infection markers."; return;;
+        test_symlink) echo "Ensure symlink targets are handled correctly."; return;;
+        test_small_elf) echo "Handle very small ELF binaries with minimal sections."; return;;
+        test_truncated_elf) echo "Handle truncated ELF headers gracefully."; return;;
+        test_invalid_elf_type) echo "Skip infection when ELF e_type is invalidated."; return;;
+        test_nonexistent_directory) echo "Gracefully handle when target directories do not exist."; return;;
+        test_elf_magic_garbage) echo "Process files with ELF magic but otherwise garbage content."; return;;
+        test_many_files) echo "Traverse directories with many files and infect binaries."; return;;
+        test_deep_directories) echo "Handle deep nested directories."; return;;
+        test_long_filename) echo "Handle binaries with very long filenames."; return;;
+        test_small_pt_note_segment) echo "Attempt infection when PT_NOTE segment is too small."; return;;
+        *) echo "Automated scenario for $1."; return;;
+    esac
+}
+
+inspect_test_setup() {
+    case "$1" in
+        test_dynamic_pie_executable) echo "Input: $TEST_DIR/ls created with: cp /bin/ls \"$TEST_DIR/ls\""; return;;
+        test_static_executable) echo "Input: $TEST_DIR/hello_static built via: gcc -static -o \"$TEST_DIR/hello_static\" /tmp/hello.c"; return;;
+        test_dynamic_non_pie) echo "Input: $TEST_DIR/hello_nopie built via: gcc -no-pie -o \"$TEST_DIR/hello_nopie\" /tmp/hello_nopie.c"; return;;
+        test_shared_library) echo "Input: $TEST_DIR/libc.so.6 created with: cp /lib/x86_64-linux-gnu/libc.so.6 \"$TEST_DIR/libc.so.6\""; return;;
+        test_no_pt_note) echo "Input: $TEST_DIR/note_free built from minimal assembly or C then stripped of NOTE sections using strip_note_sections."; return;;
+        test_already_infected) echo "Input: $TEST_DIR/ls created with: cp /bin/ls \"$TEST_DIR/ls\""; return;;
+        test_non_elf_text_file) echo "Input: $TEST_DIR/testfile.txt created with: echo \"This is a regular text file\" > \"$TEST_DIR/testfile.txt\""; return;;
+        test_empty_file) echo "Input: $TEST_DIR/empty_file created with: touch \"$TEST_DIR/empty_file\""; return;;
+        test_binary_garbage) echo "Input: $TEST_DIR/garbage.bin created with: dd if=/dev/urandom of=\"$TEST_DIR/garbage.bin\" bs=1024 count=10"; return;;
+        test_multiple_binaries) echo "Inputs: $TEST_DIR/ls, $TEST_DIR/cat, $TEST_DIR/echo created with cp from /bin counterparts."; return;;
+        test_corrupted_elf_magic) echo "Input: $TEST_DIR/corrupted copied from /bin/ls then first 4 bytes zeroed with dd."; return;;
+        test_32bit_elf) echo "Input: $TEST_DIR/hello32 compiled with: gcc -m32 -o \"$TEST_DIR/hello32\" /tmp/hello32.c"; return;;
+        test_subdirectory) echo "Inputs: $TEST_DIR/ls and $TEST_DIR/subdir/cat created via cp /bin/ls and cp /bin/cat after mkdir -p subdir."; return;;
+        test_infected_binary_runs) echo "Input: $TEST_DIR/echo created with: cp /bin/echo \"$TEST_DIR/echo\""; return;;
+        test_readonly_file) echo "Input: $TEST_DIR/readonly_ls created with cp /bin/ls then chmod 444."; return;;
+        test_readelf_verification) echo "Inputs: $TEST_DIR/ls and $TEST_DIR/cat created with cp from /bin."; return;;
+        test_symlink) echo "Input: $TEST_DIR/ls created with cp /bin/ls and symlink made via ln -s \"$TEST_DIR/ls\" \"$TEST_DIR/ls_link\""; return;;
+        test_small_elf) echo "Input: $TEST_DIR/tiny assembled from /tmp/tiny.s using nasm and ld."; return;;
+        test_truncated_elf) echo "Input: $TEST_DIR/truncated_elf created with ELF magic then padded with dd to under 64 bytes."; return;;
+        test_invalid_elf_type) echo "Input: $TEST_DIR/invalid_type copied from /bin/ls then e_type zeroed via dd seek 16 count 2."; return;;
+        test_nonexistent_directory) echo "Input: none; directories /tmp/test and /tmp/test2 intentionally removed."; return;;
+        test_elf_magic_garbage) echo "Input: $TEST_DIR/fake_elf starting with ELF magic then garbage appended via dd."; return;;
+        test_many_files) echo "Inputs: 50 text files via echo loop plus $TEST_DIR/ls and $TEST_DIR/cat copied from /bin."; return;;
+        test_deep_directories) echo "Input: $TEST_DIR/a/b/c/d/e/ls created after mkdir -p and cp /bin/ls."; return;;
+        test_long_filename) echo "Input: $TEST_DIR/<200-char name> created with cp /bin/ls to a long filename."; return;;
+        test_small_pt_note_segment) echo "Input: $TEST_DIR/small_note compiled with gcc -no-pie then tiny PT_NOTE section injected via objcopy."; return;;
+        *) echo "Inputs are prepared inside $1."; return;;
+    esac
+}
+
+write_inspect_header() {
+    local test_name="$1"
+    local logfile="$2"
+    {
+        echo "===== HEADER ====="
+        echo "Test name : $test_name"
+        echo "Purpose   : $(inspect_test_description "$test_name")"
+        echo "Input     : $(inspect_test_setup "$test_name")"
+        echo "Body      : readelf -l output before and after infection (captured below)"
+        echo "=================="
+    } >> "$logfile"
+}
+
+write_inspect_footer() {
+    local logfile="$1"
+    local status="${CURRENT_TEST_STATUS:-unknown}"
+    local conclusion="${CURRENT_TEST_CONCLUSION:-No conclusion captured}"
+    {
+        echo "===== FOOTER ====="
+        echo "Result    : $status"
+        echo "Conclusion: $conclusion"
+        echo "=================="
+    } >> "$logfile"
 }
 
 run_famine_with_dump() {
@@ -176,10 +277,19 @@ run_famine_with_dump() {
 run_test() {
     local test_name="$1"; shift || true
     LOG_CURRENT=""
-    if [ "$VERBOSE" -eq 1 ]; then
+    CURRENT_TEST_CONCLUSION=""
+    CURRENT_TEST_STATUS=""
+    if [ "$INSPECT" -eq 1 ]; then
         mkdir -p "$LOG_DIR"
         LOG_CURRENT="$LOG_DIR/${test_name}.log"
-        "$test_name" "$@" 2>&1 | tee "$LOG_CURRENT"
+        : > "$LOG_CURRENT"
+        write_inspect_header "$test_name" "$LOG_CURRENT"
+        "$test_name" "$@" > >(tee -a "$LOG_CURRENT") 2>&1
+        write_inspect_footer "$LOG_CURRENT"
+    elif [ "$VERBOSE" -eq 1 ]; then
+        mkdir -p "$LOG_DIR"
+        LOG_CURRENT="$LOG_DIR/${test_name}.log"
+        "$test_name" "$@" > >(tee "$LOG_CURRENT") 2>&1
     else
         "$test_name" "$@"
     fi
