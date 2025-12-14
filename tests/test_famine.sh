@@ -49,7 +49,7 @@ setup_test_env() {
 }
 
 cleanup_test_env() {
-    log_info "Cleaning up test environment..."
+    log_info "Cleaning up test environment... \n"
     rm -rf "$TEST_DIR" "$TEST_DIR2"
 }
 
