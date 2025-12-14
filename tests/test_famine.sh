@@ -279,17 +279,27 @@ run_test() {
     LOG_CURRENT=""
     CURRENT_TEST_CONCLUSION=""
     CURRENT_TEST_STATUS=""
+    local tmp_log=""
+    local logfile=""
     if [ "$INSPECT" -eq 1 ]; then
         mkdir -p "$LOG_DIR"
-        LOG_CURRENT="$LOG_DIR/${test_name}.log"
-        : > "$LOG_CURRENT"
-        write_inspect_header "$test_name" "$LOG_CURRENT"
-        "$test_name" "$@" > >(tee -a "$LOG_CURRENT") 2>&1
-        write_inspect_footer "$LOG_CURRENT"
+        logfile="$LOG_DIR/${test_name}.log"
+        LOG_CURRENT="$logfile"
+        : > "$logfile"
+        write_inspect_header "$test_name" "$logfile"
+        tmp_log=$(mktemp)
+        "$test_name" "$@" >"$tmp_log" 2>&1
+        cat "$tmp_log" | tee -a "$logfile"
+        rm -f "$tmp_log"
+        write_inspect_footer "$logfile"
     elif [ "$VERBOSE" -eq 1 ]; then
         mkdir -p "$LOG_DIR"
-        LOG_CURRENT="$LOG_DIR/${test_name}.log"
-        "$test_name" "$@" > >(tee "$LOG_CURRENT") 2>&1
+        logfile="$LOG_DIR/${test_name}.log"
+        LOG_CURRENT=""
+        tmp_log=$(mktemp)
+        "$test_name" "$@" >"$tmp_log" 2>&1
+        cat "$tmp_log" | tee "$logfile"
+        rm -f "$tmp_log"
     else
         "$test_name" "$@"
     fi
