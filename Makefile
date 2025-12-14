@@ -18,6 +18,9 @@ endif
 ifneq (,$(findstring -v,$(MAKEFLAGS)))
 VERBOSE_FLAG := -v
 endif
+ifeq ($(filter verbose,$(MAKECMDGOALS)),verbose)
+VERBOSE_FLAG := -v
+endif
 
 # Source files
 SRC_S    = sources/main.s
@@ -58,5 +61,6 @@ test: all
 
 # Dummy target so `make test -v` works without error
 -v:
+verbose:
 
-.PHONY: clean fclean re test -v
+.PHONY: clean fclean re test -v verbose
