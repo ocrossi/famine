@@ -156,9 +156,11 @@ dump_readelf_if_verbose() {
     [ "$VERBOSE" -eq 1 ] || return
     for target in "$@"; do
         [ -f "$target" ] || continue
-        echo "--- readelf -l ($phase) $(basename "$target") ---"
-        readelf -l "$target" || true
-        echo "--- end ---"
+        {
+            echo "--- readelf -l ($phase) $(basename "$target") ---"
+            readelf -l "$target" || true
+            echo "--- end ---"
+        } | if [ -n "${LOG_CURRENT:-}" ]; then tee -a "$LOG_CURRENT"; else cat; fi
     done
 }
 
@@ -173,12 +175,15 @@ run_famine_with_dump() {
 
 run_test() {
     local test_name="$1"; shift || true
+    LOG_CURRENT=""
     if [ "$VERBOSE" -eq 1 ]; then
         mkdir -p "$LOG_DIR"
-        "$test_name" "$@" 2>&1 | tee "$LOG_DIR/${test_name}.log"
+        LOG_CURRENT="$LOG_DIR/${test_name}.log"
+        "$test_name" "$@" 2>&1 | tee "$LOG_CURRENT"
     else
         "$test_name" "$@"
     fi
+    LOG_CURRENT=""
     echo ""
 }
 
