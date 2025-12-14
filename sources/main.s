@@ -96,7 +96,7 @@ decrypt_stub_start:
     
     ; Advance and wrap key index
     inc rbx
-    cmp rbx, 16                     ; Key length = 16
+    cmp rbx, XOR_KEY_LENGTH         ; Key length
     jl .no_key_reset
     xor rbx, rbx                    ; Reset key index to 0
 .no_key_reset:

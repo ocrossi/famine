@@ -35,6 +35,9 @@
 %define GRND_RANDOM     2
 %define PTRACE_TRACEME  0
 
+; Obfuscation constants
+%define XOR_KEY_LENGTH  16
+
 ; %define PROG_SIZE               _end - main
 ; %define JMP_OFFSET              jump - main
 ; %define SIGNATURE_SIZE          _end - signature
