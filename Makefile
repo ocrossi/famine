@@ -45,6 +45,11 @@ TARGET   = $(BIN_DIR)/$(BIN_NAME)
 # Default target
 all: $(TARGET)
 
+# Obfuscated target
+obfuscate: $(TARGET)
+	python3 obfuscate.py $(TARGET) $(TARGET).obf
+	mv $(TARGET).obf $(TARGET)
+
 # Create objects directory if it doesn't exist
 
 $(OBJ_DIR):
