@@ -8,6 +8,17 @@ OBJ_DIR  = objects
 BIN_DIR  = .
 BIN_NAME = Famine
 
+VERBOSE_FLAG :=
+ifeq ($(filter -v,$(MAKECMDGOALS)),-v)
+VERBOSE_FLAG := -v
+endif
+ifeq ($(VERBOSE),1)
+VERBOSE_FLAG := -v
+endif
+ifneq (,$(findstring -v,$(MAKEFLAGS)))
+VERBOSE_FLAG := -v
+endif
+
 # Source files
 SRC_S    = sources/main.s
 
@@ -43,6 +54,9 @@ fclean: clean
 re: fclean all
 
 test: all
-	./tests/test_famine.sh
+	./tests/test_famine.sh $(VERBOSE_FLAG)
 
-.PHONY: clean fclean re test
+# Dummy target so `make test -v` works without error
+-v:
+
+.PHONY: clean fclean re test -v

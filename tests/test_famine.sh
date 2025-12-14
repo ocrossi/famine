@@ -24,6 +24,19 @@ TEST_DIR2="/tmp/test2"
 # Exit code markers
 SIGNAL_EXIT_THRESHOLD=128
 SIGSEGV_EXIT_CODE=139
+VERBOSE=${VERBOSE:-0}
+
+while getopts "v" opt; do
+    case "$opt" in
+        v) VERBOSE=1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+# Allow verbose via MAKEFLAGS containing -v or env VERBOSE=1
+if [ "$VERBOSE" -eq 0 ] && echo "${MAKEFLAGS:-}" | grep -q -- "-v"; then
+    VERBOSE=1
+fi
 
 # Helper functions
 log_info() {
@@ -134,6 +147,31 @@ strip_note_sections() {
     done
 }
 
+dump_readelf_if_verbose() {
+    local phase="$1"; shift
+    [ "$VERBOSE" -eq 1 ] || return
+    for target in "$@"; do
+        [ -f "$target" ] || continue
+        echo "--- readelf -l ($phase) $(basename "$target") ---"
+        readelf -l "$target" || true
+        echo "--- end ---"
+    done
+}
+
+run_famine_with_dump() {
+    local targets=("$@")
+    dump_readelf_if_verbose "before" "${targets[@]}"
+    local status=0
+    "$FAMINE_BIN" > /dev/null 2>&1 || status=$?
+    dump_readelf_if_verbose "after" "${targets[@]}"
+    return $status
+}
+
+run_test() {
+    "$@"
+    echo ""
+}
+
 # ============================================
 # TEST CASES
 # ============================================
@@ -154,7 +192,7 @@ test_dynamic_pie_executable() {
     log_info "Original ls: $original_notes NOTE segments, $original_loads LOAD segments"
     
     # Run Famine
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls"
     
     print_infection_status "$TEST_DIR/ls" "ls (PIE)"
     local new_loads
@@ -191,7 +229,7 @@ EOF
         
         log_info "Original static binary: $original_notes NOTE segments, $original_loads LOAD segments"
         
-        "$FAMINE_BIN" > /dev/null 2>&1 || true
+        run_famine_with_dump "$TEST_DIR/hello_static"
         
         print_infection_status "$TEST_DIR/hello_static" "static binary"
         local new_loads
@@ -235,7 +273,7 @@ EOF
         elf_type=$(readelf -h "$TEST_DIR/hello_nopie" 2>/dev/null | grep "Type:" | awk '{print $2}')
         log_info "Created $elf_type binary: $original_notes NOTE segments, $original_loads LOAD segments"
         
-        "$FAMINE_BIN" > /dev/null 2>&1 || true
+        run_famine_with_dump "$TEST_DIR/hello_nopie"
         
         print_infection_status "$TEST_DIR/hello_nopie" "hello_nopie"
         local new_loads
@@ -271,7 +309,7 @@ test_shared_library() {
         
         log_info "Original libc.so: $original_notes NOTE segments, $original_loads LOAD segments"
         
-        "$FAMINE_BIN" > /dev/null 2>&1 || true
+        run_famine_with_dump "$TEST_DIR/libc.so.6"
         
         print_infection_status "$TEST_DIR/libc.so.6" "libc.so.6"
         local new_loads
@@ -334,7 +372,7 @@ EOF
         
         log_info "Note-free binary: $original_notes NOTE segments, $original_loads LOAD segments"
         
-        "$FAMINE_BIN" > /dev/null 2>&1 || true
+        run_famine_with_dump "$binary"
         
         print_infection_status "$binary" "note-free binary"
         local new_loads
@@ -372,7 +410,7 @@ test_already_infected() {
     log_info "Original binary has $original_notes PT_NOTE segments"
     
     # First infection
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls"
     
     local loads_after_first
     loads_after_first=$(count_pt_load_segments "$TEST_DIR/ls")
@@ -380,7 +418,7 @@ test_already_infected() {
     notes_after_first=$(count_pt_note_segments "$TEST_DIR/ls")
     
     # Second infection attempt
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls"
     
     print_infection_status "$TEST_DIR/ls" "ls after re-infection attempt"
     local loads_after_second
@@ -412,7 +450,7 @@ test_non_elf_text_file() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/testfile.txt")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/testfile.txt"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/testfile.txt")
@@ -438,7 +476,7 @@ test_empty_file() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/empty_file")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/empty_file"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/empty_file")
@@ -465,7 +503,7 @@ test_binary_garbage() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/garbage.bin")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/garbage.bin"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/garbage.bin")
@@ -497,7 +535,7 @@ test_multiple_binaries() {
     local echo_notes
     echo_notes=$(count_pt_note_segments "$TEST_DIR/echo")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls" "$TEST_DIR/cat" "$TEST_DIR/echo"
     
     print_infection_status_for_files "$TEST_DIR/ls" "$TEST_DIR/cat" "$TEST_DIR/echo"
     local infected=0
@@ -535,7 +573,7 @@ test_corrupted_elf_magic() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/corrupted")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/corrupted"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/corrupted")
@@ -571,7 +609,7 @@ EOF
         elf_class=$(readelf -h "$TEST_DIR/hello32" 2>/dev/null | grep "Class:" | awk '{print $2}')
         log_info "Created ELF class: $elf_class"
         
-        "$FAMINE_BIN" > /dev/null 2>&1 || true
+        run_famine_with_dump "$TEST_DIR/hello32"
         
         local new_size
         new_size=$(stat -c%s "$TEST_DIR/hello32")
@@ -579,9 +617,9 @@ EOF
         print_infection_status "$TEST_DIR/hello32" "32-bit binary"
         # 32-bit ELF should be treated as non-ELF64 and get signature
         if [ "$new_size" -gt "$original_size" ]; then
-            log_pass "32-bit ELF treated as non-ELF64 executable (signature appended)"
+            log_pass "32-bit ELF treated as non-ELF64 executable (signature appended, infection skipped)"
         else
-            log_pass "32-bit ELF handled (may have been skipped correctly)"
+            log_pass "32-bit ELF handled (skipped infection; no changes observed)"
         fi
     else
         log_info "Skipping 32-bit test (32-bit compilation not available)"
@@ -601,7 +639,7 @@ test_subdirectory() {
     cp /bin/ls "$TEST_DIR/ls"
     cp /bin/cat "$TEST_DIR/subdir/cat"
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls" "$TEST_DIR/subdir/cat"
     
     print_infection_status_for_files "$TEST_DIR/ls" "$TEST_DIR/subdir/cat"
     local root_infected=0
@@ -640,7 +678,7 @@ test_infected_binary_runs() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/echo")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/echo"
     
     print_infection_status "$TEST_DIR/echo" "echo binary"
     # Get infected file size
@@ -688,7 +726,7 @@ test_readonly_file() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/readonly_ls")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/readonly_ls"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/readonly_ls")
@@ -717,7 +755,7 @@ test_readelf_verification() {
     local cat_orig_headers
     cat_orig_headers=$(readelf -l "$TEST_DIR/cat" 2>/dev/null)
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls" "$TEST_DIR/cat"
     
     # Get new headers
     local ls_new_headers
@@ -761,7 +799,7 @@ test_symlink() {
     cp /bin/ls "$TEST_DIR/ls"
     ln -s "$TEST_DIR/ls" "$TEST_DIR/ls_link"
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls"
     
     print_infection_status_for_files "$TEST_DIR/ls" "$TEST_DIR/ls_link"
     # Check if symlink target was infected
@@ -800,7 +838,7 @@ EOF
         
         log_info "Tiny binary: $original_size bytes, $original_notes NOTE segments"
         
-        "$FAMINE_BIN" > /dev/null 2>&1 || true
+        run_famine_with_dump "$TEST_DIR/tiny"
         
         print_infection_status "$TEST_DIR/tiny" "tiny ELF"
         local new_size
@@ -836,7 +874,7 @@ test_truncated_elf() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/truncated_elf")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/truncated_elf"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/truncated_elf")
@@ -866,7 +904,7 @@ test_invalid_elf_type() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/invalid_type")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/invalid_type"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/invalid_type")
@@ -891,7 +929,7 @@ test_nonexistent_directory() {
     # Don't create /tmp/test - it should not exist
     
     local exit_code=0
-    "$FAMINE_BIN" > /dev/null 2>&1 || exit_code=$?
+    run_famine_with_dump || exit_code=$?
     
     # Famine should handle non-existent directory gracefully
     if [ "$exit_code" -eq 0 ] || [ "$exit_code" -lt "$SIGNAL_EXIT_THRESHOLD" ]; then
@@ -919,7 +957,7 @@ test_elf_magic_garbage() {
     local original_size
     original_size=$(stat -c%s "$TEST_DIR/fake_elf")
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/fake_elf"
     
     local new_size
     new_size=$(stat -c%s "$TEST_DIR/fake_elf")
@@ -945,7 +983,7 @@ test_many_files() {
     cp /bin/ls "$TEST_DIR/ls"
     cp /bin/cat "$TEST_DIR/cat"
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/ls" "$TEST_DIR/cat"
     
     # Check if binaries were infected
     print_infection_status_for_files "$TEST_DIR/ls" "$TEST_DIR/cat"
@@ -975,7 +1013,7 @@ test_deep_directories() {
     mkdir -p "$TEST_DIR/a/b/c/d/e"
     cp /bin/ls "$TEST_DIR/a/b/c/d/e/ls"
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/a/b/c/d/e/ls"
     
     print_infection_status "$TEST_DIR/a/b/c/d/e/ls" "deep ls"
     if check_pt_load_infection "$TEST_DIR/a/b/c/d/e/ls"; then
@@ -999,7 +1037,7 @@ test_long_filename() {
     
     cp /bin/ls "$TEST_DIR/$long_name"
     
-    "$FAMINE_BIN" > /dev/null 2>&1 || true
+    run_famine_with_dump "$TEST_DIR/$long_name"
     
     print_infection_status "$TEST_DIR/$long_name" "long filename binary"
     if check_pt_load_infection "$TEST_DIR/$long_name"; then
@@ -1052,7 +1090,7 @@ PY
         log_info "Small PT_NOTE binary: $original_notes NOTE segment(s), advertised size: ${note_size:-unknown} bytes"
         
         local famine_exit=0
-        "$FAMINE_BIN" > /dev/null 2>&1 || famine_exit=$?
+        run_famine_with_dump "$TEST_DIR/small_note" || famine_exit=$?
         
         print_infection_status "$TEST_DIR/small_note" "small PT_NOTE binary"
         
@@ -1092,32 +1130,32 @@ main() {
     build_famine
     
     # Run all tests
-    test_dynamic_pie_executable
-    test_static_executable
-    test_dynamic_non_pie
-    test_shared_library
-    test_no_pt_note
-    test_small_pt_note_segment
-    test_already_infected
-    test_non_elf_text_file
-    test_empty_file
-    test_binary_garbage
-    test_multiple_binaries
-    test_corrupted_elf_magic
-    test_32bit_elf
-    test_subdirectory
-    test_infected_binary_runs
-    test_readonly_file
-    test_readelf_verification
-    test_symlink
-    test_small_elf
-    test_truncated_elf
-    test_invalid_elf_type
-    test_nonexistent_directory
-    test_elf_magic_garbage
-    test_many_files
-    test_deep_directories
-    test_long_filename
+    run_test test_dynamic_pie_executable
+    run_test test_static_executable
+    run_test test_dynamic_non_pie
+    run_test test_shared_library
+    run_test test_no_pt_note
+    run_test test_small_pt_note_segment
+    run_test test_already_infected
+    run_test test_non_elf_text_file
+    run_test test_empty_file
+    run_test test_binary_garbage
+    run_test test_multiple_binaries
+    run_test test_corrupted_elf_magic
+    run_test test_32bit_elf
+    run_test test_subdirectory
+    run_test test_infected_binary_runs
+    run_test test_readonly_file
+    run_test test_readelf_verification
+    run_test test_symlink
+    run_test test_small_elf
+    run_test test_truncated_elf
+    run_test test_invalid_elf_type
+    run_test test_nonexistent_directory
+    run_test test_elf_magic_garbage
+    run_test test_many_files
+    run_test test_deep_directories
+    run_test test_long_filename
     
     echo ""
     echo "============================================"
