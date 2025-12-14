@@ -20,6 +20,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 FAMINE_BIN="$PROJECT_DIR/Famine"
 TEST_DIR="/tmp/test"
 TEST_DIR2="/tmp/test2"
+LOG_DIR="$PROJECT_DIR/logs"
 
 # Exit code markers
 SIGNAL_EXIT_THRESHOLD=128
@@ -36,6 +37,9 @@ shift $((OPTIND-1))
 # Allow verbose via MAKEFLAGS containing -v or env VERBOSE=1
 if [ "$VERBOSE" -eq 0 ] && echo "${MAKEFLAGS:-}" | grep -q -- "-v"; then
     VERBOSE=1
+fi
+if [ "$VERBOSE" -eq 1 ]; then
+    mkdir -p "$LOG_DIR"
 fi
 
 # Helper functions
@@ -168,7 +172,13 @@ run_famine_with_dump() {
 }
 
 run_test() {
-    "$@"
+    local test_name="$1"; shift || true
+    if [ "$VERBOSE" -eq 1 ]; then
+        mkdir -p "$LOG_DIR"
+        "$test_name" "$@" 2>&1 | tee "$LOG_DIR/${test_name}.log"
+    else
+        "$test_name" "$@"
+    fi
     echo ""
 }
 
