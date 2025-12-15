@@ -8,6 +8,7 @@
 %define SYS_MUNMAP      11
 %define SYS_GETPID      39
 %define SYS_GETDENTS64  217
+%define SYS_GETRANDOM   318
 ; %define SYS_EXIT        60
 ; %define SYS_WAIT4       61
 ; %define SYS_FTRUNCATE   77
