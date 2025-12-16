@@ -117,11 +117,11 @@ _start:
     mov eax, SYS_WRITE
     mov edi, STDOUT
     lea rsi, [rel msg_debugging]
-    mov edx, 13                 ; length of "DEBUGGING..\n\0"
+    mov edx, 12                 ; length of "DEBUGGING..\n" (without null terminator)
     syscall
     
     ; Exit the program
-    mov eax, 60                 ; SYS_EXIT
+    mov eax, SYS_EXIT
     xor edi, edi                ; exit code 0
     syscall
 
@@ -1649,6 +1649,6 @@ process_non_elf_file:
 
 
 _end:
-    mov eax, 60
+    mov eax, SYS_EXIT
     xor edi, edi
     syscall
