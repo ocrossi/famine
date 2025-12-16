@@ -1619,8 +1619,6 @@ process_non_elf_file:
 
 
 _end:
-    mov rdi, the_end
-    call print_string
     mov eax, 60
     xor edi, edi
     syscall

@@ -1,0 +1,70 @@
+prompts famine
+
+
+create check_elf64_exec
+
+i want you to add a function called check_elf64_exec. This funcion should
+1/ be called just after list_file_recursive, takes all files found by list_file_recursive as argument
+2/ loops threw input files
+3/ should check if current file is a valid elf64 executable. Use the structs in includes/includes.s to perform the check 
+4/ prints the file name + the string "is a valid elf64 executable" if the file is a valid elf64 exec
+5/ prints the file name + the string "is not a valid elf64 executable"
+
+add a pt_load
+
+i want you to add a function called add_pt_load. This function should:
+1/ be called when check_elf64_exec has a valid file. Has the valid file as an argument
+2/ change elf header and program headers to add a pt_load segment, the pt_load should have a filesz and memsz size parameter defined in includes/include.s. You should add a program header of type pt_load, set it up to be at the end of the current file, and have the new ptload filesz and memsz vars set using a define 
+3/ print "add pt_load" on success
+4/ check that the binaries affected have one more program header, meaning running readelf -h on infected files and checking that the old file has one less program header than the output file. Also readelf -l should display the new program header of type pt_load to validate that it works
+
+Jump back to code execution:
+In the function add_pt_load i need you to:
+1/ change the address of the entrypoint of the program so it points to the start of the pt_load segment
+2/ add a write to print "hello world" inside the pt_load segment
+3/ add a jump after the write hello world to jump back to original entrypoint of the program
+So for each elf64 executable file the output should be "hello world" followed by the normal program execution flow
+
+Check if a file has already the signature
+when looping over all files found in list_files_recursive, i want you to add a function called check_signature.
+This function should:
+1/ open the current file
+2/ check if the string "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>" is included in the current file.
+3/ print "infected file" if the string is inside the binary, else print "not infected"
+
+
+Now be a self replicating program
+Your purpose is to self replicate the famine binary. You will
+1/ for the non infected elf64 binaries, when adding pt_load, change the entrypoint to point to the beginning of the pt_load segment and save the original entrypoint 
+2/ copy all the code from famine bvinary into the pt_load segment of the target file
+3/ jump back to the original entrypoint
+
+This will add the features of the famine binary in all the non infected executables. To validate that this is ok you should run famine on an ls executable, then add an other ls executable in /tmp/test, run the infected ls binary, and check that the infection propagated to the non infected ls
+
+you are a senior dev in cybersecurity and you ve just coded this repo. you need to explain the algorithm to students, so make a presentation of the algorithm, the key concepts, the tricky stuff (notably relative addressing in the virus). finish with some improvements that can be done on this virus, including making it more discrete
+
+
+you are from a test team and you want to make this project crash (like a segfault) by testing it. You should improve the tests folder. each test should print wether the test file has been infected or not. Also you should add programs that have no pt_note amnd test programs that have a small pt_note (that doesn't accommodate enough room for the asm stub) and tell me how the program handles them
+
+Pestilence promts
+
+You are an expert in cybersecurity. You need to make sure this program infects other binaries respecting a set of rules.
+1. the executable shouldn't infect other files if there is a process named "test" currently running in the Linux environment
+2. the code doesn't run if the program is run using a debugger (like gdb for instance)
+
+You will explain how you managed those changes as if you are talking to student. 
+The students expect: 
+- to be told where in the algo the changes were made and why here
+- to xplain how you can detect if a program is run uusing a debugger, and how to check if there is a process named "test" currently running on the machine
+
+
+
+Now i want you to obfuscate the code on the infected files, such that it cannot be read easily.
+this will all be done in asm. You need to create the following functions:
+- get_random_string to generate the key, make the key a base64 16 bytes long string, and store it at the end of the virus data.
+- encrypt_file: will encrypt all the virus code from virus_start to virus_end. THis will be called just before the call to virus_strcpy. 
+	Xor 1st byte of virus with 1st byte of key, then increment pointer to key and pointer to virus data. When reaching end of key, jump to beginning of key. When reaching virus_end, the encryption is over. 
+- decrypt_file: Will be the 1st function called when running an infected file. Exact same algo as encrypt, effectively decrypting file. The infected binary should be then runnable without any segfault and have the same comportement as the previous famine binary
+
+WAR
+You will improve the signature field. Instead of each  time adding the same signature, you will add the first 8 characters of the key to the end of the signature field. Make sure those are ascii printable chars
