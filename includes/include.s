@@ -5,6 +5,7 @@
 %define SYS_CLOSE       3
 %define SYS_LSEEK       8
 %define SYS_MMAP        9
+%define SYS_MPROTECT    10
 %define SYS_MUNMAP      11
 %define SYS_GETPID      39
 %define SYS_GETDENTS64  217
@@ -22,6 +23,7 @@
 %define SEEK_END        2
 %define PROT_READ       1
 %define PROT_WRITE      2
+%define PROT_EXEC       4
 %define MAP_SHARED      1
 %define PT_LOAD	        1
 %define PT_NOTE         4
