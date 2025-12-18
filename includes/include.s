@@ -134,5 +134,3 @@ firstDir:       db "/tmp/test", 0
 secondDir:      db "/tmp/test2", 0
 signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 signature_len:  equ $ - signature - 1
-
-the_end:        db "This is the end my friend, my only friend the end", 0xA, 0
