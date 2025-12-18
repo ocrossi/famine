@@ -32,6 +32,8 @@
 %define DT_REG          8
 %define GRND_RANDOM     2
 %define PTRACE_TRACEME  0
+%define AT_FDCWD        -100
+%define KEY_SIZE        16
 
 ; %define PROG_SIZE               _end - main
 ; %define JMP_OFFSET              jump - main
