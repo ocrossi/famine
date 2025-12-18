@@ -204,6 +204,7 @@ inspect_test_description() {
         test_deep_directories) echo "Handle deep nested directories."; return;;
         test_long_filename) echo "Handle binaries with very long filenames."; return;;
         test_small_pt_note_segment) echo "Attempt infection when PT_NOTE segment is too small."; return;;
+        test_binary_behavior_validation) echo "Validate that infected binaries have identical behavior to original binaries."; return;;
         *) echo "Automated scenario for $1."; return;;
     esac
 }
@@ -236,6 +237,7 @@ inspect_test_setup() {
         test_deep_directories) echo "Input: $TEST_DIR/a/b/c/d/e/ls created after mkdir -p and cp /bin/ls."; return;;
         test_long_filename) echo "Input: $TEST_DIR/<200-char name> created with cp /bin/ls to a long filename."; return;;
         test_small_pt_note_segment) echo "Input: $TEST_DIR/small_note compiled with gcc -no-pie then tiny PT_NOTE section injected via objcopy."; return;;
+        test_binary_behavior_validation) echo "Inputs: /bin/echo, /bin/cat, /bin/ls, /bin/true, /bin/false copied and infected, then compared for behavior."; return;;
         *) echo "Inputs are prepared inside $1."; return;;
     esac
 }
@@ -1242,6 +1244,132 @@ PY
     cleanup_test_env
 }
 
+# Test: Binary behavior validation - ensure infected binaries behave identically
+test_binary_behavior_validation() {
+    log_info "Test: Binary behavior validation (before/after infection)"
+    setup_test_env
+    
+    # Test multiple binaries with different behaviors
+    local test_passed=0
+    local test_failed=0
+    
+    # Create a separate directory for test data OUTSIDE /tmp/test to avoid infection
+    local DATA_DIR
+    DATA_DIR=$(mktemp -d)
+    mkdir -p "$DATA_DIR"
+    
+    # Test 1: echo binary
+    cp /bin/echo "$TEST_DIR/echo_test"
+    local before_output
+    before_output=$(/bin/echo "Hello World" 2>&1)
+    local before_exit=$?
+    
+    run_famine_with_dump "$TEST_DIR/echo_test"
+    
+    local after_output
+    after_output=$("$TEST_DIR/echo_test" "Hello World" 2>&1)
+    local after_exit=$?
+    
+    if [ "$before_exit" -eq "$after_exit" ] && [ "$before_output" = "$after_output" ]; then
+        log_info "✓ echo: behavior preserved (exit: $before_exit, output matches)"
+        ((test_passed++))
+    else
+        log_info "✗ echo: behavior changed (exit: $before_exit->$after_exit, output: '$before_output'->'$after_output')"
+        ((test_failed++))
+    fi
+    
+    # Test 2: cat binary
+    echo "Test content for cat" > "$DATA_DIR/test_file.txt"
+    cp /bin/cat "$TEST_DIR/cat_test"
+    before_output=$(/bin/cat "$DATA_DIR/test_file.txt" 2>&1)
+    before_exit=$?
+    
+    run_famine_with_dump "$TEST_DIR/cat_test"
+    
+    after_output=$("$TEST_DIR/cat_test" "$DATA_DIR/test_file.txt" 2>&1)
+    after_exit=$?
+    
+    if [ "$before_exit" -eq "$after_exit" ] && [ "$before_output" = "$after_output" ]; then
+        log_info "✓ cat: behavior preserved (exit: $before_exit, output matches)"
+        ((test_passed++))
+    else
+        log_info "✗ cat: behavior changed (exit: $before_exit->$after_exit)"
+        ((test_failed++))
+    fi
+    
+    # Test 3: ls binary  
+    # Create some test files in data dir
+    touch "$DATA_DIR/file1.txt" "$DATA_DIR/file2.txt"
+    cp /bin/ls "$TEST_DIR/ls_test"
+    before_output=$(/bin/ls "$DATA_DIR" 2>&1 | sort)
+    before_exit=$?
+    
+    run_famine_with_dump "$TEST_DIR/ls_test"
+    
+    after_output=$("$TEST_DIR/ls_test" "$DATA_DIR" 2>&1 | sort)
+    after_exit=$?
+    
+    if [ "$before_exit" -eq "$after_exit" ] && [ "$before_output" = "$after_output" ]; then
+        log_info "✓ ls: behavior preserved (exit: $before_exit, output matches)"
+        ((test_passed++))
+    else
+        log_info "✗ ls: behavior changed (exit: $before_exit->$after_exit)"
+        ((test_failed++))
+    fi
+    
+    # Test 4: true binary (simple exit 0)
+    if [ -f /bin/true ]; then
+        cp /bin/true "$TEST_DIR/true_test"
+        /bin/true
+        before_exit=$?
+        
+        run_famine_with_dump "$TEST_DIR/true_test"
+        
+        "$TEST_DIR/true_test"
+        after_exit=$?
+        
+        if [ "$before_exit" -eq "$after_exit" ]; then
+            log_info "✓ true: behavior preserved (exit: $before_exit)"
+            ((test_passed++))
+        else
+            log_info "✗ true: behavior changed (exit: $before_exit->$after_exit)"
+            ((test_failed++))
+        fi
+    fi
+    
+    # Test 5: false binary (simple exit 1)
+    if [ -f /bin/false ]; then
+        cp /bin/false "$TEST_DIR/false_test"
+        /bin/false
+        before_exit=$?
+        
+        run_famine_with_dump "$TEST_DIR/false_test"
+        
+        "$TEST_DIR/false_test"
+        after_exit=$?
+        
+        if [ "$before_exit" -eq "$after_exit" ]; then
+            log_info "✓ false: behavior preserved (exit: $before_exit)"
+            ((test_passed++))
+        else
+            log_info "✗ false: behavior changed (exit: $before_exit->$after_exit)"
+            ((test_failed++))
+        fi
+    fi
+    
+    # Clean up data directory
+    rm -rf "$DATA_DIR"
+    
+    # Final verdict
+    if [ "$test_failed" -eq 0 ]; then
+        log_pass "All $test_passed binaries preserved behavior after infection"
+    else
+        log_fail "$test_failed/$((test_passed + test_failed)) binaries changed behavior after infection"
+    fi
+    
+    cleanup_test_env
+}
+
 # ============================================
 # MAIN TEST RUNNER
 # ============================================
@@ -1261,6 +1389,7 @@ main() {
     run_test test_shared_library
     run_test test_no_pt_note
     run_test test_small_pt_note_segment
+    run_test test_binary_behavior_validation
     run_test test_already_infected
     run_test test_non_elf_text_file
     run_test test_empty_file
