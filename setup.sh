@@ -12,4 +12,4 @@ cp /bin/ls $dir/depth1/depth2/
 
 make re 
 
-./Famine
+# ./Famine

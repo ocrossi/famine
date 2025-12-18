@@ -77,3 +77,10 @@ this will all be done in asm. You need to create the following functions:
 
 WAR
 You will improve the signature field. Instead of each  time adding the same signature, you will add the first 8 characters of the key to the end of the signature field. Make sure those are ascii printable chars
+
+
+
+BONUS
+
+Add a rule to the makefile, make bonus, that when run the famine binary infects all files from the root directory of the system
+
