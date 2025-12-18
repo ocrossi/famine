@@ -135,6 +135,7 @@ decrypt_code:
     push r12
     push r13
     push r14
+    push r9
     
     mov r12, rdi        ; buffer
     mov r13, rsi        ; buffer size
@@ -149,21 +150,24 @@ decrypt_code:
     jge .decrypt_done
     
     ; Get current encrypted byte
-    mov al, [r12 + rbx]
+    movzx eax, byte [r12 + rbx]   ; zero-extend to clear high bits
     
     ; Reverse rotation (rotate right by 3)
     ror al, 3
     
-    ; Get key byte (rotating through key)
+    ; Save rotated byte in r9b
+    mov r9b, al
+    
+    ; Get key byte
+    ; Calculate key index: r8 % key_size
     mov rax, r8
     xor rdx, rdx
     div rcx             ; r8 / key_size, remainder in rdx
-    mov r10b, [r14 + rdx]  ; key byte
+    mov r10b, [r14 + rdx]  ; get key byte
     
     ; XOR with key byte
-    mov al, [r12 + rbx]
-    ror al, 3           ; First undo rotation
-    xor al, r10b        ; Then undo XOR
+    movzx eax, r9b      ; zero-extend the rotated byte
+    xor al, r10b        ; XOR with key
     
     ; Store decrypted byte
     mov [r12 + rbx], al
@@ -173,6 +177,7 @@ decrypt_code:
     jmp .decrypt_loop
     
 .decrypt_done:
+    pop r9
     pop r14
     pop r13
     pop r12
