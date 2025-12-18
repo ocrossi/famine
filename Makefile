@@ -57,13 +57,8 @@ $(TARGET): $(OBJS)
 	ld $^ -o $@
 
 # Encryption tool
-$(ENCRYPT_TOOL): $(TOOLS_DIR)/encrypt_famine.s
-	$(AS) $(ASFLAGS) $< -o $(ENCRYPT_TOOL).o
-	ld $(ENCRYPT_TOOL).o -o $(ENCRYPT_TOOL)
-
-# Encrypt the Famine binary after compilation
-encrypt: $(ENCRYPT_TOOL) $(TARGET)
-	./$(ENCRYPT_TOOL)
+encrypt: $(TARGET)
+	python3 ./tools/encrypt_famine.py
 
 # Compile .s files to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
