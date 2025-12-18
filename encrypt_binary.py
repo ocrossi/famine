@@ -129,10 +129,10 @@ def encrypt_famine_binary(binary_path):
     struct.pack_into('<Q', binary_data, encryption_flag_offset, 1)
     print(f"[*] Set encryption_flag to 1")
     
-    # Store the key in encryption_key_storage (in .bss section)
-    # Make sure binary is long enough
-    if len(binary_data) < encryption_key_storage_offset + KEY_SIZE:
-        binary_data.extend(b'\x00' * (encryption_key_storage_offset + KEY_SIZE - len(binary_data)))
+    # Store the key in encryption_key_storage (.data section)
+    # encryption_key_storage is already allocated in the binary, just overwrite it
+    if encryption_key_storage_offset + KEY_SIZE > len(binary_data):
+        raise ValueError(f"encryption_key_storage extends beyond binary (offset: 0x{encryption_key_storage_offset:x}, size: {len(binary_data)})")
     
     # Write key to encryption_key_storage
     binary_data[encryption_key_storage_offset:encryption_key_storage_offset + KEY_SIZE] = key

