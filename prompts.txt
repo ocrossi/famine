@@ -62,6 +62,15 @@ The random string has to be present in the Famine binary and has to be ascii alp
 After compilation & encryption of the Famine binary, running objdump -d ./Famine should display obfuscated code 
 Make sure all the tests are ok 
 
+
+ keep only the encrypt simple method.
+ as an output i want 2 binaries, encrypt and famine.
+ when i run ./encrypt Famine the encryption should occur. 
+ Then i will manually check on famine binary with objjdump -d to see obfuscation of Famine binary.
+ Finally i should be able to run ./Famine without segfault, the binary should decrypt itself at runtime 
+ Famine should pass all the tests. 
+ I want the chain of thoughts you had to go to the result of this PR, each decision one sentence in a file called brainfood.txt 
+
 --- encryption ---
 
 You are an expert in cybersecurity. You need to make sure this program infects other binaries respecting a set of rules.
