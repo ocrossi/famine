@@ -1073,7 +1073,11 @@ virus_infect_elf:
 ; VIRUS CODE END
 ; ============================================
 virus_end:
-; The KEY_SIZE-byte encryption key is stored immediately after virus_end
+; Reserve space for the encryption key (16 bytes)
+; This space will be filled by the encryption tool after compilation
+encryption_key_storage: times KEY_SIZE db 0
+
+; The KEY_SIZE-byte encryption key is stored at virus_end
 ; Total virus size including key = virus_end - virus_start + KEY_SIZE
 
 ; ============================================

@@ -7,6 +7,8 @@ SRC_DIR  = sources
 OBJ_DIR  = objects
 BIN_DIR  = .
 BIN_NAME = Famine
+TOOLS_DIR = tools
+ENCRYPT_TOOL = $(TOOLS_DIR)/encrypt_famine
 
 VERBOSE_FLAG :=
 ifeq ($(filter -v,$(MAKECMDGOALS)),-v)
@@ -43,7 +45,7 @@ OBJS     = $(OBJ_S)
 TARGET   = $(BIN_DIR)/$(BIN_NAME)
 
 # Default target
-all: $(TARGET)
+all: $(TARGET) encrypt
 
 # Create objects directory if it doesn't exist
 
@@ -54,12 +56,17 @@ $(OBJ_DIR):
 $(TARGET): $(OBJS)
 	ld $^ -o $@
 
+# Encryption tool
+encrypt: $(TARGET)
+	python3 ./tools/encrypt_famine.py
+
 # Compile .s files to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 clean:
 	rm -rf $(OBJ_DIR)
+	rm -f $(ENCRYPT_TOOL) $(ENCRYPT_TOOL).o
 
 fclean: clean
 	rm -f $(TARGET)
@@ -74,4 +81,4 @@ test: all
 verbose:
 inspect:
 
-.PHONY: clean fclean re test -v verbose inspect
+.PHONY: clean fclean re test -v verbose inspect encrypt
