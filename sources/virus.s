@@ -120,8 +120,8 @@ _start:
     syscall
 
 ; ============================================
-; decrypt_code - Decrypt buffer with XOR and rotation  
-; NO DIVISION - use simple counter wrapping
+; decrypt_code - Decrypt buffer with XOR and rotation
+; No push/pop in loop, use only registers
 ; ============================================
 decrypt_code:
     push rbp
@@ -137,37 +137,40 @@ decrypt_code:
     mov r12, rdi        ; buffer
     mov r13, rsi        ; size
     mov r14, rdx        ; key
-    mov r15, rcx        ; keysize
+    mov r15, rcx        ; keysize (16)
     
-    xor rbx, rbx        ; buffer index
-    xor r8, r8          ; key index
+    xor rbx, rbx
+    xor r8, r8
+    xor r9, r9
     
-.decrypt_loop:
+.loop:
     cmp rbx, r13
-    jge .decrypt_done
+    jge .done
     
-    ; Load encrypted byte
-    movzx eax, byte [r12 + rbx]
-    ror al, 3
+    ; Load byte and rotate
+    xor r8, r8
+    mov r8b, [r12 + rbx]
+    ror r8b, 3
     
-    ; XOR with key[r8]
-    movzx r9d, byte [r14 + r8]
-    xor al, r9b
+    ; Get key index via modulo
+    mov rax, rbx
+    xor rdx, rdx
+    mov r9, 16
+    div r9
+    ; rdx = rbx % 16
+    
+    ; XOR with key
+    xor r9, r9
+    mov r9b, [r14 + rdx]
+    xor r8b, r9b
     
     ; Store
-    mov byte [r12 + rbx], al
+    mov [r12 + rbx], r8b
     
-    ; Increment indices
     inc rbx
-    inc r8
+    jmp .loop
     
-    ; Wrap key index if needed
-    cmp r8, r15
-    jl .decrypt_loop
-    xor r8, r8
-    jmp .decrypt_loop
-    
-.decrypt_done:
+.done:
     pop r15
     pop r14
     pop r13
@@ -175,6 +178,7 @@ decrypt_code:
     pop r9
     pop r8
     pop rbx
+    mov rsp, rbp
     pop rbp
     ret
 
