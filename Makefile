@@ -53,6 +53,7 @@ $(OBJ_DIR):
 # Link object files into executable
 $(TARGET): $(OBJS)
 	ld $^ -o $@
+	python3 encrypt_binary.py $@
 
 # Compile .s files to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)

