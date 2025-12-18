@@ -46,9 +46,8 @@ ENCRYPT_OBJ = $(OBJ_DIR)/encrypt.o
 TARGET   = $(BIN_DIR)/$(BIN_NAME)
 ENCRYPT  = $(BIN_DIR)/$(ENCRYPT_NAME)
 
-# Default target - build Famine and encrypt it
+# Default target - build Famine and encrypt (without auto-running encryption)
 all: $(TARGET) $(ENCRYPT)
-	./$(ENCRYPT)
 
 # Create objects directory if it doesn't exist
 $(OBJ_DIR):

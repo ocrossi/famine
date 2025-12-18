@@ -120,13 +120,8 @@ _start:
     syscall
 
 ; ============================================
-; decrypt_code - Decrypt buffer with XOR and rotation
-; rdi = buffer to decrypt
-; rsi = buffer size  
-; rdx = key pointer
-; rcx = key size
-; Uses XOR with rotating key and bit rotation (reverse of encryption)
-; This function must NOT be encrypted (it's the decryptor)
+; decrypt_code - Decrypt buffer with XOR and rotation  
+; NO DIVISION - use simple counter wrapping
 ; ============================================
 decrypt_code:
     push rbp
@@ -134,61 +129,52 @@ decrypt_code:
     push rbx
     push r8
     push r9
-    push r10
     push r12
     push r13
     push r14
+    push r15
     
     mov r12, rdi        ; buffer
-    mov r13, rsi        ; buffer size
-    mov r14, rdx        ; key pointer
-    ; rcx already has key size
+    mov r13, rsi        ; size
+    mov r14, rdx        ; key
+    mov r15, rcx        ; keysize
     
-    xor rbx, rbx        ; buffer offset
+    xor rbx, rbx        ; buffer index
     xor r8, r8          ; key index
     
 .decrypt_loop:
     cmp rbx, r13
     jge .decrypt_done
     
-    ; Get current encrypted byte
-    movzx eax, byte [r12 + rbx]   ; zero-extend to clear high bits
-    
-    ; Reverse rotation (rotate right by 3)
+    ; Load encrypted byte
+    movzx eax, byte [r12 + rbx]
     ror al, 3
     
-    ; Save rotated byte on stack (safer than register)
-    push rax
+    ; XOR with key[r8]
+    movzx r9d, byte [r14 + r8]
+    xor al, r9b
     
-    ; Get key byte
-    ; Calculate key index: r8 % key_size
-    mov rax, r8
-    xor rdx, rdx
-    push rcx            ; save key_size
-    div rcx             ; r8 / key_size, remainder in rdx
-    mov r10b, [r14 + rdx]  ; get key byte
-    pop rcx             ; restore key_size
+    ; Store
+    mov byte [r12 + rbx], al
     
-    ; XOR with key byte
-    pop rax             ; restore rotated byte
-    xor al, r10b        ; XOR with key
-    
-    ; Store decrypted byte
-    mov [r12 + rbx], al
-    
+    ; Increment indices
     inc rbx
     inc r8
+    
+    ; Wrap key index if needed
+    cmp r8, r15
+    jl .decrypt_loop
+    xor r8, r8
     jmp .decrypt_loop
     
 .decrypt_done:
+    pop r15
     pop r14
     pop r13
     pop r12
-    pop r10
     pop r9
     pop r8
     pop rbx
-    mov rsp, rbp
     pop rbp
     ret
 
