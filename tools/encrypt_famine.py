@@ -8,6 +8,11 @@ import sys
 import os
 import struct
 
+# ELF64 constants
+ELF64_E_PHOFF_OFFSET = 32  # Offset to program header table in ELF header
+ELF64_E_PHNUM_OFFSET = 56  # Offset to number of program headers in ELF header
+ELF64_PHDR_SIZE = 56       # Size of each program header entry
+
 def main():
     famine_path = "./Famine"
     
@@ -101,22 +106,18 @@ def main():
     # Write key to key storage
     data[key_storage_offset:key_storage_offset + 16] = key
     
-    # Write encrypted binary back
-    with open(famine_path, 'wb') as f:
-        f.write(data)
-    
     # Now we need to update the program headers to make .text writable
     # so that the decryption can write back the decrypted bytes
     # The .text segment needs to have RWE flags instead of just RE
     
     # Seek to the program header for .text
     # Program headers start at offset e_phoff (which is at offset 32 in ELF header)
-    e_phoff = struct.unpack_from('<Q', data, 32)[0]
-    e_phnum = struct.unpack_from('<H', data, 56)[0]
+    e_phoff = struct.unpack_from('<Q', data, ELF64_E_PHOFF_OFFSET)[0]
+    e_phnum = struct.unpack_from('<H', data, ELF64_E_PHNUM_OFFSET)[0]
     
     # Find the .text segment (the second LOAD segment with R E flags)
     for i in range(e_phnum):
-        phdr_offset = e_phoff + i * 56  # Each phdr is 56 bytes
+        phdr_offset = e_phoff + i * ELF64_PHDR_SIZE
         p_type = struct.unpack_from('<I', data, phdr_offset)[0]
         p_flags = struct.unpack_from('<I', data, phdr_offset + 4)[0]
         p_offset = struct.unpack_from('<Q', data, phdr_offset + 8)[0]
