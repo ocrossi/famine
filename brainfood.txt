@@ -39,4 +39,10 @@ Chain of Thought for Encryption System Implementation
 
 19. Ensured proper register initialization (xor r8, r8; xor r9, r9) to avoid garbage values affecting decryption operations.
 
-20. Debugged assembly decrypt_code extensively - encryption works, Python manual decryption works, all tests pass unencrypted, but assembly decrypt has persistent segfault issue requiring further investigation with debugger or additional instrumentation.
+20. Per user feedback, added dynamic storage for encrypted_offset and encrypted_size (both 8 bytes) in virus_start structure to support position-independent encryption.
+
+21. Modified encrypt program to store encrypted region offset (relative to virus_start) and size, enabling dynamic decryption at runtime without hardcoded addresses.
+
+22. Updated decrypt runtime to read encrypted_offset and encrypted_size from stored values and calculate buffer address relative to virus_start for position-independence.
+
+23. Debugged assembly decrypt_code extensively - encryption works, Python manual decryption works, all tests pass unencrypted, but assembly decrypt still has persistent segfault requiring further low-level investigation.

