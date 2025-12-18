@@ -161,6 +161,7 @@ list_files_recursive:
     mov [rel file_count], rax
 
 .skip_store:
+%ifdef VERBOSE_MODE
     ; Print the full path
     mov rdi, r12                ; path
     call print_string
@@ -173,6 +174,7 @@ list_files_recursive:
     mov edx, 1
     syscall
     pop rax
+%endif
     
     jmp .restore_path
 

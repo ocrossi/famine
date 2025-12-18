@@ -2,6 +2,12 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
+# Verbose mode flag (add -DVERBOSE_MODE when verbose is requested)
+VERBOSE_DEFINE :=
+ifeq ($(MAKECMDGOALS),verbose)
+VERBOSE_DEFINE := -DVERBOSE_MODE
+endif
+
 # Directories
 SRC_DIR  = sources
 OBJ_DIR  = objects
@@ -56,7 +62,7 @@ $(TARGET): $(OBJS)
 
 # Compile .s files to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
-	$(AS) $(ASFLAGS) $< -o $@
+	$(AS) $(ASFLAGS) $(VERBOSE_DEFINE) $< -o $@
 
 clean:
 	rm -rf $(OBJ_DIR)
@@ -65,6 +71,10 @@ fclean: clean
 	rm -f $(TARGET)
 
 re: fclean all
+
+# Build with verbose output enabled
+verbose: fclean
+	$(MAKE) VERBOSE_DEFINE=-DVERBOSE_MODE all
 
 test: all
 	INSPECT=$(INSPECT_MODE) VERBOSE=$(if $(INSPECT_MODE),1,$(VERBOSE)) ./tests/test_famine.sh $(VERBOSE_FLAG)
@@ -79,7 +89,6 @@ bonus: fclean
 
 # Dummy target so `make test -v` works without error
 -v:
-verbose:
 inspect:
 
-.PHONY: clean fclean re test bonus -v verbose inspect
+.PHONY: clean fclean re verbose test bonus -v inspect

@@ -85,6 +85,7 @@ check_elf64_exec:
     mov edi, ebx
     syscall
 
+%ifdef VERBOSE_MODE
     ; Print filename
     mov rdi, r15
     call print_string
@@ -92,6 +93,7 @@ check_elf64_exec:
     ; Print " is a valid elf64 executable\n"
     lea rdi, [rel msg_valid]
     call print_string
+%endif
 
     ; Call add_pt_load for this valid ELF64 executable
     mov rdi, r15                ; pass the file path
