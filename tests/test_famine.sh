@@ -1254,7 +1254,8 @@ test_binary_behavior_validation() {
     local test_failed=0
     
     # Create a separate directory for test data OUTSIDE /tmp/test to avoid infection
-    local DATA_DIR="/tmp/test_data_$$"
+    local DATA_DIR
+    DATA_DIR=$(mktemp -d)
     mkdir -p "$DATA_DIR"
     
     # Test 1: echo binary
