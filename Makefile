@@ -78,7 +78,7 @@ fclean: clean
 
 re: fclean all
 
-test: all
+test: $(TARGET)
 	INSPECT=$(INSPECT_MODE) VERBOSE=$(if $(INSPECT_MODE),1,$(VERBOSE)) ./tests/test_famine.sh $(VERBOSE_FLAG)
 
 bonus: fclean

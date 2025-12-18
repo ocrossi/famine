@@ -132,10 +132,12 @@ decrypt_code:
     push rbp
     mov rbp, rsp
     push rbx
+    push r8
+    push r9
+    push r10
     push r12
     push r13
     push r14
-    push r9
     
     mov r12, rdi        ; buffer
     mov r13, rsi        ; buffer size
@@ -155,18 +157,20 @@ decrypt_code:
     ; Reverse rotation (rotate right by 3)
     ror al, 3
     
-    ; Save rotated byte in r9b
-    mov r9b, al
+    ; Save rotated byte on stack (safer than register)
+    push rax
     
     ; Get key byte
     ; Calculate key index: r8 % key_size
     mov rax, r8
     xor rdx, rdx
+    push rcx            ; save key_size
     div rcx             ; r8 / key_size, remainder in rdx
     mov r10b, [r14 + rdx]  ; get key byte
+    pop rcx             ; restore key_size
     
     ; XOR with key byte
-    movzx eax, r9b      ; zero-extend the rotated byte
+    pop rax             ; restore rotated byte
     xor al, r10b        ; XOR with key
     
     ; Store decrypted byte
@@ -177,10 +181,12 @@ decrypt_code:
     jmp .decrypt_loop
     
 .decrypt_done:
-    pop r9
     pop r14
     pop r13
     pop r12
+    pop r10
+    pop r9
+    pop r8
     pop rbx
     mov rsp, rbp
     pop rbp
