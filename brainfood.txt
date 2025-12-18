@@ -46,3 +46,11 @@ Chain of Thought for Encryption System Implementation
 22. Updated decrypt runtime to read encrypted_offset and encrypted_size from stored values and calculate buffer address relative to virus_start for position-independence.
 
 23. Debugged assembly decrypt_code extensively - encryption works, Python manual decryption works, all tests pass unencrypted, but assembly decrypt still has persistent segfault requiring further low-level investigation.
+
+23. Used gdb to debug segfault - discovered crash at `mov %r8b,(%r12,%rbx,1)` instruction trying to write to .text section which has R-E permissions (not writable).
+
+24. Added mprotect(2) syscall before decryption to change .text section permissions to RWX (PROT_READ | PROT_WRITE | PROT_EXEC = 7) enabling in-place decryption.
+
+25. Fixed encryption offset calculation after adding mprotect code - decrypt_code.end moved from 0x1532 to 0x156a, requiring offset update from 0x16c to 0x1a4.
+
+26. Successfully tested encrypted Famine binary - passes all 26 tests, objdump shows obfuscated code, binary self-decrypts at runtime and functions perfectly.

