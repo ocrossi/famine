@@ -5,6 +5,7 @@
 %define SYS_CLOSE       3
 %define SYS_LSEEK       8
 %define SYS_MMAP        9
+%define SYS_MPROTECT    10
 %define SYS_MUNMAP      11
 %define SYS_GETPID      39
 %define SYS_EXIT        60
@@ -23,6 +24,7 @@
 %define SEEK_END        2
 %define PROT_READ       1
 %define PROT_WRITE      2
+%define PROT_EXEC       4
 %define MAP_SHARED      1
 %define PT_LOAD	        1
 %define PT_NOTE         4
@@ -33,6 +35,9 @@
 %define DT_REG          8
 %define GRND_RANDOM     2
 %define PTRACE_TRACEME  0
+
+; Obfuscation constants
+%define XOR_KEY_LENGTH  16
 
 ; %define PROG_SIZE               _end - main
 ; %define JMP_OFFSET              jump - main

