@@ -54,3 +54,7 @@ Chain of Thought for Encryption System Implementation
 25. Fixed encryption offset calculation after adding mprotect code - decrypt_code.end moved from 0x1532 to 0x156a, requiring offset update from 0x16c to 0x1a4.
 
 26. Successfully tested encrypted Famine binary - passes all 26 tests, objdump shows obfuscated code, binary self-decrypts at runtime and functions perfectly.
+
+27. Extended virus to infect files in both /tmp/test and /tmp/test2 directories - added v_secondDir string and duplicate infection logic for second directory in both original Famine binary path and virus infection path.
+
+28. Updated encrypted_offset from 0x1a4 to 0x1dd after adding /tmp/test2 support - decrypt_code.end shifted from 0x156a to 0x15a3 due to additional code.
