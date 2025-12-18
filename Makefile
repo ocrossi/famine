@@ -2,6 +2,9 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
+# Verbose mode flag (will be set by verbose target)
+VERBOSE_DEFINE :=
+
 # Directories
 SRC_DIR  = sources
 OBJ_DIR  = objects
@@ -56,7 +59,7 @@ $(TARGET): $(OBJS)
 
 # Compile .s files to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
-	$(AS) $(ASFLAGS) $< -o $@
+	$(AS) $(ASFLAGS) $(VERBOSE_DEFINE) $< -o $@
 
 clean:
 	rm -rf $(OBJ_DIR)
@@ -66,12 +69,16 @@ fclean: clean
 
 re: fclean all
 
+# Build with verbose output enabled
+verbose: VERBOSE_DEFINE := -DVERBOSE_MODE
+verbose: fclean all
+
 test: all
 	INSPECT=$(INSPECT_MODE) VERBOSE=$(if $(INSPECT_MODE),1,$(VERBOSE)) ./tests/test_famine.sh $(VERBOSE_FLAG)
 
 bonus: fclean
 	mkdir -p $(OBJ_DIR)
-	$(AS) $(ASFLAGS) -DBONUS_MODE $(SRC_S) -o $(OBJ_DIR)/main.o
+	$(AS) $(ASFLAGS) $(VERBOSE_DEFINE) -DBONUS_MODE $(SRC_S) -o $(OBJ_DIR)/main.o
 	ld $(OBJ_DIR)/main.o -o $(TARGET)
 	@echo "WARNING: About to execute Famine targeting root directory /"
 	@echo "This will attempt to infect all files system-wide."
@@ -79,7 +86,6 @@ bonus: fclean
 
 # Dummy target so `make test -v` works without error
 -v:
-verbose:
 inspect:
 
-.PHONY: clean fclean re test bonus -v verbose inspect
+.PHONY: clean fclean re verbose test bonus -v inspect

