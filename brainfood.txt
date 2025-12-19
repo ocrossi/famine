@@ -62,3 +62,5 @@ Chain of Thought for Encryption System Implementation
 29. User removed test string from includes/include.s which shifted all binary addresses - virus_start moved from 0x13c6 to 0x1393, requiring updates to encrypt program hardcoded offsets.
 
 30. Fixed encrypt program with correct addresses: encryption_key at 0x139b, encrypted_flag at 0x13ab, decrypt_code.end at 0x1570 - encrypted binary now works perfectly with all tests passing.
+
+31. Added recursive directory traversal to virus_list_and_infect function to match behavior of list_files_recursive - virus now infects binaries in subdirectories (e.g., /tmp/test2/depth1/) not just top-level directories.
