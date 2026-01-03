@@ -8,4 +8,4 @@ retest a partir du root folder (pq est ce que tt les progs sont pas infectes + m
 
 revoir tests un par un manuel
 
-ajouter a la regle make encrypt une version dry-run
+ajouter a la regle make encrypt une version dry-run & obfuscate : OK

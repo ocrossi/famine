@@ -70,8 +70,8 @@ $(ENCRYPT): $(ENCRYPT_OBJ)
 	ld $^ -o $@
 	./$@ $(BIN_NAME) 
 
-encrypt dry-run: $(ENCRYPT_OBJ)
-	ld $^ -o $@
+dry-run: $(ENCRYPT_OBJ)
+	ld $^ -o encrypt
 
 # Compile encrypt.s
 $(ENCRYPT_OBJ): $(ENCRYPT_S) | $(OBJ_DIR)
