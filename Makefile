@@ -35,7 +35,7 @@ endif
 
 # Source files
 SRC_S    = sources/main.s
-ENCRYPT_S = sources/encrypt_simple.s
+ENCRYPT_S = sources/encrypt.s
 
 # Object files
 OBJ_S    = $(patsubst $(SRC_DIR)/%.s,$(OBJ_DIR)/%.o,$(SRC_S))
@@ -62,7 +62,15 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 # Build encrypt program
+
+obfuscate: $(ENCRYPT)
+	strip ./$(BIN_NAME)
+
 $(ENCRYPT): $(ENCRYPT_OBJ)
+	ld $^ -o $@
+	./$@ $(BIN_NAME) 
+
+encrypt dry-run: $(ENCRYPT_OBJ)
 	ld $^ -o $@
 
 # Compile encrypt.s

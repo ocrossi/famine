@@ -1,0 +1,11 @@
+relecture du code et detailler commentaires de fonctions
+
+check chaque sujet un par un
+
+test famine sur dossiers/fichiers auxquels j ai pas acces
+
+retest a partir du root folder (pq est ce que tt les progs sont pas infectes + meme prob pr fichiers textes), ajouter debug log
+
+revoir tests un par un manuel
+
+ajouter a la regle make encrypt une version dry-run
