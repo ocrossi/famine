@@ -2,6 +2,18 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
+# Verbose mode detection
+# Usage:
+#   make bonus -- -v      (use -- to prevent make from consuming -v flag)
+#   make V=1 bonus        (alternative using environment variable)
+#   V=1 make bonus        (environment variable before make command)
+ifneq (,$(filter -v,$(MAKECMDGOALS)))
+ASFLAGS += -DVERBOSE_MODE
+endif
+ifeq ($(V),1)
+ASFLAGS += -DVERBOSE_MODE
+endif
+
 # Directories
 SRC_DIR  = sources
 OBJ_DIR  = objects
@@ -75,4 +87,7 @@ bonus: fclean
 
 inspect:
 
-.PHONY: clean fclean re test bonus -v verbose inspect
+# Dummy target for -v flag
+-v:
+
+.PHONY: clean fclean re test bonus inspect -v
