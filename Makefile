@@ -2,6 +2,11 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
+# Verbose mode - enable print statements
+ifneq (,$(filter verbose,$(MAKECMDGOALS)))
+ASFLAGS += -DVERBOSE_MODE
+endif
+
 # Directories
 SRC_DIR  = sources
 OBJ_DIR  = objects
@@ -49,6 +54,9 @@ ENCRYPT  = $(BIN_DIR)/$(ENCRYPT_NAME)
 # Default target - build Famine and encrypt (without auto-running encryption)
 all: $(TARGET) $(ENCRYPT)
 
+# Verbose target - build with print statements enabled
+verbose: $(TARGET) $(ENCRYPT)
+
 # Create objects directory if it doesn't exist
 $(OBJ_DIR):
 	$(shell mkdir -p $(OBJ_DIR))
@@ -63,12 +71,12 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
 
 # Build encrypt program
 
-obfuscate: $(ENCRYPT)
+obfuscate: $(TARGET) $(ENCRYPT)
+	./$(ENCRYPT) $(BIN_NAME)
 	strip ./$(BIN_NAME)
 
 $(ENCRYPT): $(ENCRYPT_OBJ)
 	ld $^ -o $@
-	./$@ $(BIN_NAME) 
 
 dry-run: $(ENCRYPT_OBJ)
 	ld $^ -o encrypt

