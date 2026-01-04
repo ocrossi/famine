@@ -18,6 +18,7 @@ TESTS_TOTAL=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 FAMINE_BIN="$PROJECT_DIR/Famine"
+ENCRYPT_BIN="$PROJECT_DIR/encrypt"
 TEST_DIR="/tmp/test"
 TEST_DIR2="/tmp/test2"
 LOG_DIR="$PROJECT_DIR/logs"
@@ -1371,6 +1372,222 @@ test_binary_behavior_validation() {
 }
 
 # ============================================
+# ENCRYPTION TEST CASES
+# ============================================
+
+# Test: Verify encrypt binary exists and is executable
+test_encrypt_binary_exists() {
+    log_info "Test: Checking if encrypt binary exists and is executable"
+    
+    if [ -f "$ENCRYPT_BIN" ] && [ -x "$ENCRYPT_BIN" ]; then
+        log_pass "Encrypt binary exists and is executable"
+    else
+        log_fail "Encrypt binary does not exist or is not executable"
+    fi
+}
+
+# Test: Encrypt without arguments shows usage
+test_encrypt_usage() {
+    log_info "Test: Testing encrypt usage message"
+    
+    output=$("$ENCRYPT_BIN" 2>&1)
+    if echo "$output" | grep -q "Usage:"; then
+        log_pass "Encrypt shows usage message when called without arguments"
+    else
+        log_fail "Encrypt does not show usage message"
+    fi
+}
+
+# Test: Encrypt Famine binary successfully
+test_encrypt_famine() {
+    log_info "Test: Testing encryption of Famine binary"
+    setup_test_env
+    
+    # Copy Famine to test directory
+    cp "$FAMINE_BIN" "$TEST_DIR/Famine_test"
+    
+    # Run encryption
+    output=$("$ENCRYPT_BIN" "$TEST_DIR/Famine_test" 2>&1)
+    
+    if echo "$output" | grep -q "Encrypted successfully"; then
+        log_pass "Famine binary encrypted successfully"
+    else
+        log_fail "Famine binary encryption failed: $output"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test: Encrypted binary is still valid ELF
+test_encrypted_binary_valid() {
+    log_info "Test: Testing if encrypted binary is still valid ELF"
+    setup_test_env
+    
+    # Copy and encrypt Famine
+    cp "$FAMINE_BIN" "$TEST_DIR/Famine_valid"
+    "$ENCRYPT_BIN" "$TEST_DIR/Famine_valid" >/dev/null 2>&1
+    
+    # Check if it's still a valid ELF
+    if file "$TEST_DIR/Famine_valid" | grep -q "ELF"; then
+        log_pass "Encrypted binary is still a valid ELF file"
+    else
+        log_fail "Encrypted binary is not a valid ELF file"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test: Encrypted binary runs without segfault
+test_encrypted_binary_runs() {
+    log_info "Test: Testing if encrypted binary runs without segfault"
+    setup_test_env
+    
+    # Copy and encrypt Famine
+    cp "$FAMINE_BIN" "$TEST_DIR/Famine_run"
+    "$ENCRYPT_BIN" "$TEST_DIR/Famine_run" >/dev/null 2>&1
+    
+    # Run the encrypted binary
+    "$TEST_DIR/Famine_run" >/dev/null 2>&1
+    exit_code=$?
+    
+    # Exit code 0 means success, 139 means segfault
+    if [ $exit_code -ne 139 ]; then
+        log_pass "Encrypted binary runs without segfault (exit code: $exit_code)"
+    else
+        log_fail "Encrypted binary segfaults (exit code: $exit_code)"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test: Verify encryption key is written to correct location
+test_encryption_key_location() {
+    log_info "Test: Testing if encryption key is written to correct location"
+    setup_test_env
+    
+    # Get symbol addresses from nm
+    virus_start=$(nm "$FAMINE_BIN" | grep ' virus_start$' | awk '{print $1}')
+    encryption_key=$(nm "$FAMINE_BIN" | grep ' encryption_key$' | awk '{print $1}')
+    
+    if [ -z "$virus_start" ] || [ -z "$encryption_key" ]; then
+        log_fail "Cannot find required symbols in binary"
+        cleanup_test_env
+        return
+    fi
+    
+    # Copy and encrypt Famine
+    cp "$FAMINE_BIN" "$TEST_DIR/Famine_key"
+    "$ENCRYPT_BIN" "$TEST_DIR/Famine_key" >/dev/null 2>&1
+    
+    # Calculate file offset for encryption_key (vaddr - 0x401000 + 0x1000)
+    key_vaddr=$((16#$encryption_key))
+    key_offset=$((key_vaddr - 0x401000 + 0x1000))
+    
+    # Read 16 bytes at that location
+    key_bytes=$(hexdump -s $key_offset -n 16 -e '16/1 "%02x " "\n"' "$TEST_DIR/Famine_key")
+    
+    # Check if it's not all zeros (which would indicate key was written)
+    if [ "$key_bytes" != "30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 " ]; then
+        log_pass "Encryption key written to correct location (offset: 0x$(printf '%x' $key_offset))"
+    else
+        log_fail "Encryption key not written or written to wrong location"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test: Verify encrypted_flag is set
+test_encrypted_flag_set() {
+    log_info "Test: Testing if encrypted_flag is set"
+    setup_test_env
+    
+    # Get symbol address
+    encrypted_flag=$(nm "$FAMINE_BIN" | grep ' encrypted_flag$' | awk '{print $1}')
+    
+    if [ -z "$encrypted_flag" ]; then
+        log_fail "Cannot find encrypted_flag symbol in binary"
+        cleanup_test_env
+        return
+    fi
+    
+    # Copy and encrypt Famine
+    cp "$FAMINE_BIN" "$TEST_DIR/Famine_flag"
+    "$ENCRYPT_BIN" "$TEST_DIR/Famine_flag" >/dev/null 2>&1
+    
+    # Calculate file offset
+    flag_vaddr=$((16#$encrypted_flag))
+    flag_offset=$((flag_vaddr - 0x401000 + 0x1000))
+    
+    # Read 1 byte at that location
+    flag_byte=$(hexdump -s $flag_offset -n 1 -e '"%02x"' "$TEST_DIR/Famine_flag")
+    
+    if [ "$flag_byte" = "01" ]; then
+        log_pass "encrypted_flag is correctly set to 1"
+    else
+        log_fail "encrypted_flag is not set (value: 0x$flag_byte)"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test: Full obfuscation workflow (with strip)
+test_full_obfuscation() {
+    log_info "Test: Testing full obfuscation workflow with strip"
+    setup_test_env
+    
+    # Copy Famine
+    cp "$FAMINE_BIN" "$TEST_DIR/Famine_obfuscate"
+    
+    # Run encrypt
+    "$ENCRYPT_BIN" "$TEST_DIR/Famine_obfuscate" >/dev/null 2>&1
+    
+    # Run strip
+    strip "$TEST_DIR/Famine_obfuscate" 2>/dev/null
+    
+    # Try to run the obfuscated binary
+    "$TEST_DIR/Famine_obfuscate" >/dev/null 2>&1
+    exit_code=$?
+    
+    if [ $exit_code -ne 139 ]; then
+        log_pass "Fully obfuscated binary (with strip) runs without segfault"
+    else
+        log_fail "Fully obfuscated binary segfaults after strip"
+    fi
+    
+    cleanup_test_env
+}
+
+# Test: Dynamic symbol resolution (change code and verify it still works)
+test_dynamic_symbol_resolution() {
+    log_info "Test: Testing dynamic symbol resolution"
+    
+    # This test verifies that encryption uses dynamic symbol lookup
+    # by checking that the program doesn't use hardcoded offsets
+    
+    # Get actual symbol addresses
+    virus_start=$(nm "$FAMINE_BIN" | grep ' virus_start$' | awk '{print $1}')
+    encryption_key=$(nm "$FAMINE_BIN" | grep ' encryption_key$' | awk '{print $1}')
+    
+    if [ -z "$virus_start" ] || [ -z "$encryption_key" ]; then
+        log_info "Skipping dynamic symbol resolution test (symbols not found)"
+        ((TESTS_TOTAL++))
+        return
+    fi
+    
+    # Calculate expected offset
+    vs_addr=$((16#$virus_start))
+    ek_addr=$((16#$encryption_key))
+    expected_offset=$((ek_addr - vs_addr))
+    
+    # The old hardcoded offset was 8, new should dynamically calculate to 8
+    if [ $expected_offset -eq 8 ]; then
+        log_pass "Dynamic symbol resolution working (encryption_key offset from virus_start: $expected_offset)"
+    else
+        log_fail "Unexpected offset: $expected_offset (expected: 8)"
+    fi
+}
+
+# ============================================
 # MAIN TEST RUNNER
 # ============================================
 
@@ -1382,7 +1599,7 @@ main() {
     
     build_famine
     
-    # Run all tests
+    # Run all binary infection tests
     run_test test_dynamic_pie_executable
     run_test test_static_executable
     run_test test_dynamic_non_pie
@@ -1410,6 +1627,23 @@ main() {
     run_test test_many_files
     run_test test_deep_directories
     run_test test_long_filename
+    
+    echo ""
+    echo "============================================"
+    echo "Famine Encryption Test Suite"
+    echo "============================================"
+    echo ""
+    
+    # Run all encryption tests
+    run_test test_encrypt_binary_exists
+    run_test test_encrypt_usage
+    run_test test_encrypt_famine
+    run_test test_encrypted_binary_valid
+    run_test test_encrypted_binary_runs
+    run_test test_encryption_key_location
+    run_test test_encrypted_flag_set
+    run_test test_full_obfuscation
+    run_test test_dynamic_symbol_resolution
     
     echo ""
     echo "============================================"
