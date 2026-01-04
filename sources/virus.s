@@ -242,6 +242,8 @@ _start:
     lea rdi, [rel path_buffer]
     call str_copy
     lea rdi, [rel path_buffer]
+    lea rsi, [rel file_count]   ; file_count pointer
+    lea rdx, [rel file_list]    ; file_list buffer
     call list_files_recursive
     
     lea rdi, [rel file_list]
@@ -252,6 +254,8 @@ _start:
     lea rdi, [rel path_buffer]
     call str_copy
     lea rdi, [rel path_buffer]
+    lea rsi, [rel file_count]   ; file_count pointer
+    lea rdx, [rel file_list]    ; file_list buffer
     call list_files_recursive
     
     lea rdi, [rel file_list]
