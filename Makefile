@@ -80,7 +80,9 @@ bonus: fclean
 
 inspect:
 
-# Dummy target for verbose flag
-verbose:
+# Dummy target for verbose flag - build with verbose mode enabled
+verbose: fclean
+	@echo "Building with VERBOSE_MODE enabled..."
+	$(MAKE) all MAKECMDGOALS=verbose
 
 .PHONY: clean fclean re test bonus inspect verbose
