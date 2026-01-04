@@ -1400,22 +1400,58 @@ test_process_check() {
     local ls_size_before
     ls_size_before=$(stat -c%s "$TEST_DIR/ls")
     
-    # Start the "test" process in background with timeout
-    timeout 10 "$PROJECT_DIR/create_test_process/test" &
-    local test_pid=$!
+    # Start the "test" process in background (in subshell to avoid bash wrapper)
+    # Start the process, let it run, and use a separate timeout to kill it
+    (
+        "$PROJECT_DIR/create_test_process/test" &
+        TEST_CHILD_PID=$!
+        # Wait for 10 seconds or until parent dies
+        (sleep 10; kill -9 $TEST_CHILD_PID 2>/dev/null) &
+        wait $TEST_CHILD_PID 2>/dev/null
+    ) &
+    local wrapper_pid=$!
     sleep 1  # Give it time to start
     
+    # Find the actual test process PID (not the wrapper)
+    local test_pid
+    test_pid=$(ps aux | grep -E "create_test_process/test\$" | grep -v grep | awk '{print $2}' | head -1)
+    
     # Verify the test process is running
-    if ! ps -p $test_pid > /dev/null 2>&1; then
+    if [ -z "$test_pid" ] || ! ps -p $test_pid > /dev/null 2>&1; then
         log_fail "Failed to start test process"
         cleanup_test_env
         return
     fi
     
-    log_info "Test process (PID: $test_pid) is running"
+    # Verify the process name is actually "test"
+    local process_name
+    process_name=$(cat /proc/$test_pid/status 2>/dev/null | head -1 | cut -d: -f2 | tr -d '\t ')
+    log_info "Test process (PID: $test_pid, Name: $process_name) is running"
+    
+    if [ "$process_name" != "test" ]; then
+        log_fail "Process name is '$process_name', not 'test'"
+        kill -9 $test_pid 2>/dev/null || true
+        kill -9 $wrapper_pid 2>/dev/null || true
+        cleanup_test_env
+        return
+    fi
+    
+    # Double-check the process is still running right before Famine executes
+    if ! ps -p $test_pid > /dev/null 2>&1; then
+        log_fail "Test process died before Famine execution"
+        cleanup_test_env
+        return
+    fi
     
     # Run Famine - it should exit without doing anything
     run_famine_with_dump "$TEST_DIR/testfile.txt" "$TEST_DIR/ls"
+    
+    # Verify the process is still running after Famine
+    if ps -p $test_pid > /dev/null 2>&1; then
+        log_info "Test process still running after Famine execution"
+    else
+        log_info "Test process died during Famine execution"
+    fi
     
     # Get new sizes
     local txt_size_after
@@ -1423,9 +1459,11 @@ test_process_check() {
     local ls_size_after
     ls_size_after=$(stat -c%s "$TEST_DIR/ls")
     
-    # Kill the test process (we need to do it with specific PID)
+    # Kill the test process and wrapper (we need to do it with specific PIDs)
     kill -9 $test_pid 2>/dev/null || true
+    kill -9 $wrapper_pid 2>/dev/null || true
     wait $test_pid 2>/dev/null || true
+    wait $wrapper_pid 2>/dev/null || true
     
     # Verify that files were NOT modified
     if [ "$txt_size_before" -eq "$txt_size_after" ] && [ "$ls_size_before" -eq "$ls_size_after" ]; then

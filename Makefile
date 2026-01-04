@@ -8,6 +8,9 @@ endif
 ifeq ($(V),1)
 ASFLAGS += -DVERBOSE_MODE
 endif
+ifneq (,$(filter debug,$(MAKECMDGOALS)))
+ASFLAGS += -DDEBUG_MODE
+endif
 
 # Directories
 SRC_DIR  = sources
@@ -82,8 +85,12 @@ verbose: fclean
 	@echo "Building with VERBOSE_MODE enabled..."
 	$(MAKE) all MAKECMDGOALS=verbose
 
+debug: fclean
+	@echo "Building with DEBUG_MODE enabled (anti-debugging check disabled)..."
+	$(MAKE) all MAKECMDGOALS=debug
+
 inspect:
 
 
 
-.PHONY: clean fclean re test bonus inspect verbose
+.PHONY: clean fclean re test bonus inspect verbose debug

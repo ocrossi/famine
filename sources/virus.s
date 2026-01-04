@@ -29,6 +29,7 @@ _start:
     ; Use ptrace(PTRACE_TRACEME) to detect debugger
     ; Returns -1 (EPERM) if already being traced
     ; ============================================
+%ifndef DEBUG_MODE
     mov eax, SYS_PTRACE
     mov edi, PTRACE_TRACEME
     xor esi, esi
@@ -39,6 +40,7 @@ _start:
     ; If ptrace returns -1, we're being debugged
     cmp rax, -1
     je .being_debugged
+%endif
     ; ============================================
     ; DECRYPTION CHECK AND ROUTINE
     ; Check if code is encrypted and decrypt if needed
