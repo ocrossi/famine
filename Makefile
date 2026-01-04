@@ -4,10 +4,10 @@ ASFLAGS = -f elf64 -I includes -I sources
 
 # Verbose mode detection
 # Usage:
-#   make bonus -- -v      (use -- to prevent make from consuming -v flag)
+#   make bonus verbose    (add verbose to any target)
 #   make V=1 bonus        (alternative using environment variable)
 #   V=1 make bonus        (environment variable before make command)
-ifneq (,$(filter -v,$(MAKECMDGOALS)))
+ifneq (,$(filter verbose,$(MAKECMDGOALS)))
 ASFLAGS += -DVERBOSE_MODE
 endif
 ifeq ($(V),1)
@@ -87,7 +87,7 @@ bonus: fclean
 
 inspect:
 
-# Dummy target for -v flag
--v:
+# Dummy target for verbose flag
+verbose:
 
-.PHONY: clean fclean re test bonus inspect -v
+.PHONY: clean fclean re test bonus inspect verbose
