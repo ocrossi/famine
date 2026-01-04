@@ -13,6 +13,5 @@ cp /bin/ls $dir/depth1/depth2/
 cp /bin/ls $dir2/depth1/ 
 
 
-make re 
-
+# make fclean && make verbose 
 # ./Famine
