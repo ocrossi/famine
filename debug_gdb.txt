@@ -1,0 +1,259 @@
+=== GDB DEBUG SESSION: FAMINE SEGFAULT AFTER OBFUSCATION ===
+
+PROBLEM STATEMENT:
+When running `make obfuscate`, the Famine binary is encrypted and then crashes with a segmentation fault.
+
+=== ENVIRONMENT SETUP ===
+
+Building the binary:
+$ make clean && make all
+$ readelf -h Famine | grep Entry
+  Entry point address:               0x4013aa
+
+Symbol locations from nm:
+virus_start:  0x401381
+_start:       0x4013aa
+encryption_key: 0x401389
+encrypted_flag: 0x401399
+
+=== RUNNING THE OBFUSCATED BINARY ===
+
+$ make obfuscate
+./encrypt Famine
+Encrypted successfully
+strip Famine
+
+$ ./Famine
+Segmentation fault (core dumped)
+
+=== GDB SESSION OUTPUT ===
+
+$ gdb ./Famine
+(gdb) run
+Program received signal SIGSEGV, Segmentation fault.
+0x00000000004013aa in ?? ()
+
+(gdb) bt
+#0  0x00000000004013aa in ?? ()
+#1  0x0000000000000001 in ?? ()
+#2  0x00007fffffffbd4b in ?? ()
+#3  0x0000000000000000 in ?? ()
+
+(gdb) info registers
+rax            0x0                 0
+rbx            0x0                 0
+rcx            0x0                 0
+rdx            0x0                 0
+rsi            0x0                 0
+rdi            0x0                 0
+rbp            0x0                 0x0
+rsp            0x7fffffffb670      0x7fffffffb670
+r8             0x0                 0
+r9             0x0                 0
+r10            0x0                 0
+r11            0x0                 0
+r12            0x0                 0
+r13            0x0                 0
+r14            0x0                 0
+r15            0x0                 0
+rip            0x4013aa            0x4013aa
+eflags         0x10202             [ IF RF ]
+
+(gdb) x/20i 0x401393
+   0x401393:xor    %dh,(%rax)        # GARBAGE - ENCRYPTED DATA
+   0x401395:xor    %dh,(%rax)
+   0x401397:xor    %dh,(%rax)
+   0x401399:add    %al,(%rax)
+   0x40139b:rex.X
+   0x40139c:rex.W
+   0x40139d:addr32 push %rsp
+   0x40139f:jns    0x40140a
+   0x4013a1:imul   $0x6a,(%rsi),%esi
+   0x4013a4:jne    0x4013fb
+   0x4013a6:xor    0x4c(%rax),%cl
+   0x4013a9:push   %rdx
+=> 0x4013aa:outsb  %ds:(%rsi),(%dx)  # CRASH HERE - This should be "push %rbp"
+   0x4013ab:add    %ebx,%ebp
+   0x4013ad:add    %eax,(%rax)
+   0x4013af:add    %al,(%rax)
+
+(gdb) x/100xb 0x401393
+Shows encrypted/garbage data where there should be valid code.
+
+(gdb) x/16cb 0x401389  # Check encryption_key location
+Shows: 66 'B'  72 'H'  103 'g'  84 'T'  121 'y'  105 'i'  107 'k'  54 '6'
+       106 'j'  117 'u'  85 'U'  50 '2'  72 'H'  76 'L'  82 'R'  110 'n'
+This is "BHgTyik6juU2HLRn" - a valid encryption key
+
+(gdb) x/1xb 0x401399   # Check encrypted_flag
+Shows: 0x01 - Flag is set, indicating code should be encrypted
+
+(gdb) x/1xg 0x40139a   # Check encrypted_offset
+Shows: 0x00000000000001dd
+
+(gdb) x/1xg 0x4013a2   # Check encrypted_size
+Shows: 0x0000000000000637
+
+=== ROOT CAUSE ANALYSIS ===
+
+The problem is in sources/encrypt.s at lines 154-179. The encrypt program uses HARDCODED file offsets:
+
+Line 156: add rdi, 0x139b    # WRONG - assumes virus_start is at file offset 0x1393
+
+The actual offsets are:
+- virus_start is at virtual address 0x401381
+- .text section starts at file offset 0x1000 and virtual address 0x401000
+- Therefore virus_start is at file offset: 0x1381 (0x401381 - 0x401000 + 0x1000)
+
+The encrypt program assumes:
+- virus_start at file offset 0x1393
+- encryption_key at file offset 0x139b (0x1393 + 8)
+
+But the actual locations are:
+- virus_start at file offset 0x1381
+- encryption_key at file offset 0x1389 (0x1381 + 8)
+
+The difference is 0x12 bytes (18 bytes).
+
+When the encrypt program writes:
+1. The encryption key at offset 0x139b instead of 0x1389
+2. The encrypted_flag at offset 0x13ab instead of 0x1399
+3. The encrypted_offset at offset 0x13ac instead of 0x139a
+4. The encrypted_size at offset 0x13b4 instead of 0x4013a2
+
+This means all the metadata is written 0x12 bytes too far into the file, 
+which overwrites the beginning of _start function instead of the metadata fields!
+
+As a result:
+- The _start function at 0x4013aa is corrupted with encrypted data
+- When the program tries to execute from the entry point (0x4013aa), it executes 
+  garbage/encrypted bytes instead of valid x86-64 instructions
+- The CPU tries to execute "outsb %ds:(%rsi),(%dx)" which causes a segfault 
+  because the registers contain invalid values
+
+=== WHY THE OFFSETS ARE WRONG ===
+
+Looking at the comment in encrypt.s line 154:
+    ; encryption_key is at virus_start + 8 = 0x139b (0x1393 + 8)
+
+This shows the developer calculated: 0x1393 + 8 = 0x139b
+But virus_start is actually at 0x1381, not 0x1393!
+
+The calculation should be: 0x1381 + 8 = 0x1389
+
+Similarly for other offsets:
+- encrypted_flag should be at: 0x1381 + 24 (0x18) = 0x1399, not 0x13ab
+- encrypted_offset should be at: 0x1381 + 25 (0x19) = 0x139a, not 0x13ac
+- encrypted_size should be at: 0x1381 + 33 (0x21) = 0x13a2, not 0x13b4
+
+=== SOLUTION ===
+
+The encrypt.s program needs to be updated to use the correct file offsets.
+Instead of hardcoding 0x1393, it should use 0x1381 as the base offset for virus_start.
+
+All derived offsets need to be recalculated:
+- Line 156: change 0x139b to 0x1389 (encryption_key)
+- Line 168: change calculation for encrypted_flag offset
+- Line 175: change calculation for encrypted_offset offset  
+- Line 179: change calculation for encrypted_size offset
+
+Or better yet, the program should dynamically find the virus_start symbol location
+instead of hardcoding it, to prevent this issue in the future.
+
+=== VERIFICATION ===
+
+To verify the fix, after correcting the offsets:
+1. make clean && make all
+2. make obfuscate
+3. ./Famine should run without segfault
+4. The decryption routine in virus.s should properly decrypt the encrypted code section
+
+=== SUMMARY ===
+
+The segfault occurs because the encrypt program uses incorrect hardcoded file offsets
+that are 0x12 bytes too high. This causes it to write encryption metadata into the 
+_start function code, corrupting it. When the binary tries to execute, it runs 
+encrypted/garbage bytes instead of valid instructions, leading to a segmentation fault.
+
+The fix requires updating sources/encrypt.s to use the correct offset 0x1381 instead
+of 0x1393 for virus_start, and recalculating all dependent offsets.
+
+=== ADDITIONAL FINDINGS ===
+
+Checking the actual symbol locations with nm:
+virus_start:      0x401381
+decrypt_code.end: 0x401553
+virus_end:        0x401bdd
+
+Calculating the correct values for encryption parameters:
+- encrypted_offset (offset from virus_start to decrypt_code.end): 
+  0x401553 - 0x401381 = 0x1d2
+  
+- encrypted_size (size from decrypt_code.end to virus_end):
+  0x401bdd - 0x401553 = 0x68a
+
+The encrypt.s program (lines 174-179) uses:
+- encrypted_offset: 0x1dd (WRONG - should be 0x1d2)
+- encrypted_size:   0x637 (WRONG - should be 0x68a)
+
+This means not only are the offsets wrong, but also the encrypted region boundaries
+are incorrect. The program is encrypting the wrong bytes!
+
+=== COMPLETE LIST OF REQUIRED FIXES IN encrypt.s ===
+
+1. Line 156: Change from 0x139b to 0x1389
+   OLD: add rdi, 0x139b
+   NEW: add rdi, 0x1389
+   
+2. Line 175: Change from 0x1dd to 0x1d2
+   OLD: mov qword [rdi + 1], 0x1dd
+   NEW: mov qword [rdi + 1], 0x1d2
+   
+3. Line 179: Change from 0x637 to 0x68a
+   OLD: mov qword [rdi + 9], 0x637
+   NEW: mov qword [rdi + 9], 0x68a
+   
+4. Line 182-183: Update the file offset for encryption start
+   OLD: add rdi, 0x1570
+   NEW: add rdi, 0x1553
+   
+5. Line 184: Update the size to encrypt
+   OLD: mov rsi, 0x637
+   NEW: mov rsi, 0x68a
+
+=== DETAILED GDB SESSION WITH MEMORY EXAMINATION ===
+
+Additional GDB commands to see the corruption:
+
+(gdb) x/40xb 0x401381
+0x401381:0x000x000x000x000x000x000x000x00  <- original_entry_storage (8 bytes)
+0x401389:0x420x480x670x540x790x690x6b0x36  <- encryption_key part 1
+0x401391:0x6a0x750x550x320x480x4c0x520x6e  <- encryption_key part 2
+0x401399:0x010xdd0x010x000x000x000x000x00  <- encrypted_flag + encrypted_offset
+0x4013a1:0x000x370x060x000x000x000x000x00  <- encrypted_size
+
+But what the binary actually has after encryption:
+0x401393 area gets the encryption key (should be at 0x401389)
+0x4013ab gets the encrypted_flag (should be at 0x401399)
+
+This means:
+- The area from 0x401393 to 0x4013aa (23 bytes) is corrupted with metadata
+- The _start function begins at 0x4013aa
+- The first instruction of _start should be "push %rbp" (0x55)
+- But instead it has encrypted data because the metadata overwrote it!
+
+(gdb) compare 0x4013aa
+Before encryption (from unencrypted binary):
+   0x4013aa:push   %rbp                # 0x55
+   0x4013ab:mov    %rsp,%rbp           # 0x48 0x89 0xe5
+   0x4013ae:push   %rbx                # 0x53
+
+After encryption (from obfuscated binary):
+   0x4013aa:outsb  %ds:(%rsi),(%dx)    # Garbage - encrypted metadata!
+   0x4013ab:add    %ebx,%ebp           # Garbage
+   0x4013ad:add    %eax,(%rax)         # Garbage
+
+The corruption starts at 0x401393 (where encrypt writes the key)
+and extends to 0x4013b4 (where it writes encrypted_size).
+This completely corrupts the first part of _start!
+
