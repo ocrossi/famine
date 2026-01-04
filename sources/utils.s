@@ -278,12 +278,12 @@ check_process_running:
 .check_proc_done:
     mov rax, r15                ; Return process found flag
 
-    pop rbx
+    add rsp, 512                ; Deallocate buffer first
+    pop rbx                     ; Then restore registers in reverse order
     pop r15
     pop r14
     pop r13
     pop r12
-    add rsp, 512
     mov rsp, rbp
     pop rbp
     ret
