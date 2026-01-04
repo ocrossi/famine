@@ -13,9 +13,8 @@
 %define STACK_LOCALS    128
 
 ; ============================================
-; list_files_recursive(char *path)
-; rdi = pointer to path string
-; Uses stack-allocated buffer for directory entries
+; rdi = pointer vesr le directory path
+; setup d une stack pr stocker les entrees
 ; ============================================
 list_files_recursive:
     push rbp
@@ -217,6 +216,3 @@ list_files_recursive:
     mov rsp, rbp
     pop rbp
     ret
-
-
-

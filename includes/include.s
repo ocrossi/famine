@@ -134,3 +134,5 @@ firstDir:       db "/tmp/test", 0
 secondDir:      db "/tmp/test2", 0
 signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 signature_len:  equ $ - signature - 1
+msg_err_pt_load_close: db "add_pt_laod failed", 0
+msg_err_write_failed: db "write failed", 0

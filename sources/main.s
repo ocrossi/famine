@@ -389,6 +389,8 @@ add_pt_load:
     jmp .add_pt_load_done
 
 .add_pt_load_close_fail:
+    lea rdi, [rel msg_err_pt_load_close]
+    call print_string
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
@@ -406,7 +408,8 @@ add_pt_load:
     ret
 
 ; ============================================
-; process_non_elf_file(char *filepath)
+; process_non_elf_file
+; rdi = filepath
 ; ============================================
 process_non_elf_file:
     push rbp
@@ -546,6 +549,8 @@ process_non_elf_file:
     jmp .process_done
 
 .process_write_failed:
+    lea rdi, [rel msg_err_write_failed]
+    call print_string
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
