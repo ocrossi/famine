@@ -2,11 +2,6 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
-# Verbose mode - enable print statements
-ifneq (,$(filter verbose,$(MAKECMDGOALS)))
-ASFLAGS += -DVERBOSE_MODE
-endif
-
 # Directories
 SRC_DIR  = sources
 OBJ_DIR  = objects
@@ -14,29 +9,6 @@ BIN_DIR  = .
 BIN_NAME = Famine
 ENCRYPT_NAME = encrypt
 
-VERBOSE_FLAG :=
-ifeq ($(filter -v,$(MAKECMDGOALS)),-v)
-VERBOSE_FLAG := -v
-endif
-ifeq ($(VERBOSE),1)
-VERBOSE_FLAG := -v
-endif
-ifneq (,$(findstring -v,$(MAKEFLAGS)))
-VERBOSE_FLAG := -v
-endif
-ifeq ($(filter verbose,$(MAKECMDGOALS)),verbose)
-VERBOSE_FLAG := -v
-endif
-
-INSPECT_MODE :=
-ifneq (,$(filter inspect,$(MAKECMDGOALS)))
-INSPECT_MODE := 1
-VERBOSE_FLAG := -v
-endif
-ifeq ($(INSPECT),1)
-INSPECT_MODE := 1
-VERBOSE_FLAG := -v
-endif
 
 # Source files
 SRC_S    = sources/main.s
@@ -53,9 +25,6 @@ ENCRYPT  = $(BIN_DIR)/$(ENCRYPT_NAME)
 
 # Default target - build Famine and encrypt (without auto-running encryption)
 all: $(TARGET) $(ENCRYPT)
-
-# Verbose target - build with print statements enabled
-verbose: $(TARGET) $(ENCRYPT)
 
 # Create objects directory if it doesn't exist
 $(OBJ_DIR):
@@ -77,9 +46,6 @@ obfuscate: $(TARGET) $(ENCRYPT)
 
 $(ENCRYPT): $(ENCRYPT_OBJ)
 	ld $^ -o $@
-
-dry-run: $(ENCRYPT_OBJ)
-	ld $^ -o encrypt
 
 # Compile encrypt.s
 $(ENCRYPT_OBJ): $(ENCRYPT_S) | $(OBJ_DIR)
@@ -107,9 +73,6 @@ bonus: fclean
 	@echo "This will attempt to infect all files system-wide."
 	./$(TARGET)
 
-# Dummy target so `make test -v` works without error
--v:
-verbose:
 inspect:
 
 .PHONY: clean fclean re test bonus -v verbose inspect
