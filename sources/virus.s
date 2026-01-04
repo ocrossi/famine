@@ -1128,9 +1128,9 @@ check_test_process:
     lea rdi, [rbp-4224]
     add rdi, r14                ; dirent pointer
     
-    ; Get d_reclen (offset 16)
+    ; Get d_reclen (offset 16)  
     movzx ecx, word [rdi + 16]
-    mov rbx, rcx                ; save d_reclen
+    mov [rbp-40], rcx           ; save d_reclen on stack
     
     ; Get d_name (offset 19)
     lea rsi, [rdi + 19]
@@ -1229,7 +1229,8 @@ check_test_process:
     jnz .ctp_found
     
 .ctp_next_entry:
-    add r14, rbx                ; pos += d_reclen
+    mov rax, [rbp-40]           ; restore d_reclen
+    add r14, rax                ; pos += d_reclen
     jmp .ctp_process_entry
     
 .ctp_found:
