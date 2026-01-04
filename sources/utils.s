@@ -140,12 +140,12 @@ search_substring:
 check_process_running:
     push rbp
     mov rbp, rsp
-    sub rsp, 512                ; Stack space for buffers
     push r12                    ; proc fd
     push r13                    ; status fd
     push r14                    ; dirent buffer ptr
     push r15                    ; process found flag
     push rbx
+    sub rsp, 512                ; Stack space for buffers (AFTER pushes)
 
     xor r15, r15                ; process found flag = 0
 
@@ -166,7 +166,7 @@ check_process_running:
     ; Read directory entries
     mov eax, SYS_GETDENTS64
     mov edi, r12d
-    lea rsi, [rbp-512]          ; Buffer on stack
+    lea rsi, [rsp]              ; Buffer at rsp (after stack allocation)
     mov edx, 512
     syscall
 
