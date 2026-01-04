@@ -1431,50 +1431,83 @@ test_process_check() {
     log_info "Test: Process check - Famine should not execute when 'test' process is running"
     setup_test_env
     
-    # Create a simple script that will run as "test"
-    cat > "$TEST_DIR/test" << 'EOF'
-#!/bin/bash
-sleep 30
+    # Create a simple C program that will run as "test"
+    cat > /tmp/test_prog.c << 'EOF'
+#include <unistd.h>
+int main() {
+    sleep(60);
+    return 0;
+}
 EOF
-    chmod +x "$TEST_DIR/test"
+    
+    # Compile it to a binary named "test" (outside /tmp/test directory)
+    gcc -o "$TEST_DIR/../test_binary" /tmp/test_prog.c 2>/dev/null
+    if [ $? -ne 0 ]; then
+        log_info "Skipping process check test (gcc not available)"
+        ((TESTS_TOTAL++))
+        cleanup_test_env
+        return
+    fi
     
     # Start the test process in background
-    "$TEST_DIR/test" &
+    "$TEST_DIR/../test_binary" &
     local test_pid=$!
     
     # Give it a moment to start
     sleep 1
     
-    # Verify the process is running with pgrep
-    if pgrep -x "test" > /dev/null; then
-        log_info "Test process is running (PID: $test_pid)"
+    # Verify the process is running
+    if ps -p $test_pid > /dev/null 2>&1; then
+        log_info "Test binary process is running (PID: $test_pid)"
         
-        # Create a test binary for Famine to potentially infect
-        cp /bin/ls "$TEST_DIR/ls"
+        # Now check if pgrep can find it by the binary name
+        # The binary needs to be named "test" for pgrep to find it
+        # Let's create a symlink or copy with the right name
+        cp "$TEST_DIR/../test_binary" "$HOME/test"
         
-        local original_size
-        original_size=$(stat -c%s "$TEST_DIR/ls")
+        # Kill the old process and start with the correctly named binary
+        kill $test_pid 2>/dev/null
+        wait $test_pid 2>/dev/null || true
         
-        # Run Famine - it should exit without doing anything
-        local exit_code=0
-        timeout 5 "$FAMINE_BIN" > /dev/null 2>&1 || exit_code=$?
+        # Start with correct name
+        "$HOME/test" &
+        test_pid=$!
+        sleep 1
         
-        # Check if the binary was NOT infected (Famine should have exited early)
-        local new_size
-        new_size=$(stat -c%s "$TEST_DIR/ls")
-        
-        if [ "$new_size" -eq "$original_size" ] && ! check_pt_load_infection "$TEST_DIR/ls"; then
-            log_pass "Famine correctly exited when 'test' process was detected (no infection occurred)"
+        # Verify pgrep can find it
+        if pgrep -x "test" > /dev/null; then
+            log_info "Test process confirmed running with correct name (verified by pgrep)"
+            
+            # Create a test binary for Famine to potentially infect
+            cp /bin/ls "$TEST_DIR/ls"
+            
+            local original_size
+            original_size=$(stat -c%s "$TEST_DIR/ls")
+            
+            # Run Famine - it should exit without doing anything
+            local exit_code=0
+            timeout 5 "$FAMINE_BIN" > /dev/null 2>&1 || exit_code=$?
+            
+            # Check if the binary was NOT infected (Famine should have exited early)
+            local new_size
+            new_size=$(stat -c%s "$TEST_DIR/ls")
+            
+            if [ "$new_size" -eq "$original_size" ] && ! check_pt_load_infection "$TEST_DIR/ls"; then
+                log_pass "Famine correctly exited when 'test' process was detected (no infection occurred)"
+            else
+                log_fail "Famine executed despite 'test' process running (infection occurred)"
+            fi
         else
-            log_fail "Famine executed despite 'test' process running (infection occurred)"
+            log_fail "Test process not detected by pgrep (process name not set correctly)"
         fi
     else
         log_fail "Failed to start test process"
     fi
     
-    # Clean up the test process
+    # Clean up the test process and files
     kill $test_pid 2>/dev/null || true
     wait $test_pid 2>/dev/null || true
+    rm -f /tmp/test_prog.c "$TEST_DIR/../test_binary" "$HOME/test"
     
     cleanup_test_env
 }
