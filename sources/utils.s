@@ -1,8 +1,21 @@
 ; ============================================
 ; UTILITY FUNCTIONS
-; These functions have been moved into virus.s to be part of the virus payload
-; This allows both original Famine and virus code to use the same functions
-; reducing code duplication
+; 
+; Core utility functions (str_len, str_copy, search_substring) have been
+; moved into virus.s to be part of the virus payload. This allows both
+; the original Famine binary and the virus code running in infected binaries
+; to use the same function implementations, eliminating code duplication.
+; 
+; Benefits:
+; - Single source of truth for core utilities
+; - No duplicate virus_* versions needed
+; - Both execution contexts use identical code
+; - Improved maintainability
+; 
+; Tradeoff:
+; - Utility functions are now included in the virus payload (adds ~87 lines)
+; - But eliminates need for duplicate versions (saves ~84 lines)
+; - Net impact: minimal size increase, significant structural improvement
 ; ============================================
 
 ; str_len, str_copy, and search_substring are now defined in virus.s
@@ -21,7 +34,7 @@ print_string:
 
     ; Get string length
     mov rsi, rdi                ; save string pointer
-    call str_len                ; rax = length (calls virus.s version)
+    call str_len                ; rax = length
 
     ; Write to stdout
     mov rdx, rax                ; length

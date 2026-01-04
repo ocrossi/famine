@@ -14,10 +14,10 @@
 
 ; ============================================
 ; list_files_recursive - Position-independent file listing
-; rdi = pointer to directory path  
+; rdi = pointer to directory path
 ; rsi = pointer to file_count (uint64_t*)
 ; rdx = pointer to file_list buffer
-; 
+;
 ; This function is position-independent and can be called from both
 ; original Famine and virus code contexts.
 ; ============================================
