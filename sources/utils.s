@@ -181,7 +181,7 @@ check_process_running:
     cmp rax, [rbp-8]
     jge .check_proc_read_loop
 
-    lea rdi, [rbp-512]
+    lea rdi, [rsp]
     add rdi, rax                ; dirent pointer
 
     ; Get d_reclen
@@ -199,23 +199,23 @@ check_process_running:
     ja .check_proc_next_entry
 
     ; Build path: /proc/[pid]/status
-    lea rdi, [rbp-256]          ; path buffer
+    lea rdi, [rsp+256]          ; path buffer
     lea rsi, [rel procdir]
     call str_copy               ; Copy "/proc/"
     
-    lea rdi, [rbp-256]
+    lea rdi, [rsp+256]
     mov rax, 6                  ; length of "/proc/"
     add rdi, rax
-    lea rsi, [rbp-512]
+    lea rsi, [rsp]
     mov rax, [rbp-16]
     add rsi, rax
     add rsi, 19                 ; d_name
     call str_copy               ; Copy pid
     
     ; Append "/status"
-    lea rdi, [rbp-256]
+    lea rdi, [rsp+256]
     call str_len
-    lea rdi, [rbp-256]
+    lea rdi, [rsp+256]
     add rdi, rax
     lea rsi, [rel proc_status]
     call str_copy
@@ -223,7 +223,7 @@ check_process_running:
     ; Open status file
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
-    lea rsi, [rbp-256]
+    lea rsi, [rsp+256]
     xor edx, edx                ; O_RDONLY
     xor r10d, r10d
     syscall
@@ -236,7 +236,7 @@ check_process_running:
     ; Read status file (first 256 bytes should be enough)
     mov eax, SYS_READ
     mov edi, r13d
-    lea rsi, [rbp-384]          ; status buffer
+    lea rsi, [rsp+128]          ; status buffer
     mov edx, 128
     syscall
 
@@ -251,7 +251,7 @@ check_process_running:
     jle .check_proc_next_entry
 
     ; Search for "Name:\ttest\n" in status buffer
-    lea rdi, [rbp-384]
+    lea rdi, [rsp+128]
     mov rsi, [rbp-32]           ; bytes read
     lea rdx, [rel proc_test.string]
     mov rcx, proc_test.len
