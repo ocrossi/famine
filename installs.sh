@@ -1,1 +1,1 @@
-apt-get install zsh git neovim nasm make
+apt-get install zsh git neovim nasm make openssh-server
