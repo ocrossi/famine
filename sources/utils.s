@@ -132,3 +132,159 @@ search_substring:
     pop rbp
     ret
 
+; ============================================
+; check_process_running()
+; Checks if a process named "test" is running
+; Returns: rax = 1 if "test" process is running, 0 otherwise
+; ============================================
+check_process_running:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 512                ; Stack space for buffers
+    push r12                    ; proc fd
+    push r13                    ; status fd
+    push r14                    ; dirent buffer ptr
+    push r15                    ; process found flag
+    push rbx
+
+    xor r15, r15                ; process found flag = 0
+
+    ; Open /proc directory
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    lea rsi, [rel procdir]
+    mov edx, O_RDONLY | O_DIRECTORY
+    xor r10d, r10d
+    syscall
+
+    test rax, rax
+    js .check_proc_done         ; Failed to open /proc
+
+    mov r12, rax                ; Save /proc fd
+
+.check_proc_read_loop:
+    ; Read directory entries
+    mov eax, SYS_GETDENTS64
+    mov edi, r12d
+    lea rsi, [rbp-512]          ; Buffer on stack
+    mov edx, 512
+    syscall
+
+    test rax, rax
+    jle .check_proc_close       ; EOF or error
+
+    mov [rbp-8], rax            ; Save bytes read
+    mov qword [rbp-16], 0       ; pos = 0
+
+.check_proc_process_entry:
+    mov rax, [rbp-16]
+    cmp rax, [rbp-8]
+    jge .check_proc_read_loop
+
+    lea rdi, [rbp-512]
+    add rdi, rax                ; dirent pointer
+
+    ; Get d_reclen
+    movzx ecx, word [rdi + 16]
+    mov [rbp-24], rcx
+
+    ; Get d_name
+    lea rsi, [rdi + 19]
+
+    ; Check if d_name is numeric (process directory)
+    movzx eax, byte [rsi]
+    cmp al, '0'
+    jb .check_proc_next_entry
+    cmp al, '9'
+    ja .check_proc_next_entry
+
+    ; Build path: /proc/[pid]/status
+    lea rdi, [rbp-256]          ; path buffer
+    lea rsi, [rel procdir]
+    call str_copy               ; Copy "/proc/"
+    
+    lea rdi, [rbp-256]
+    mov rax, 6                  ; length of "/proc/"
+    add rdi, rax
+    lea rsi, [rbp-512]
+    mov rax, [rbp-16]
+    add rsi, rax
+    add rsi, 19                 ; d_name
+    call str_copy               ; Copy pid
+    
+    ; Append "/status"
+    lea rdi, [rbp-256]
+    call str_len
+    lea rdi, [rbp-256]
+    add rdi, rax
+    lea rsi, [rel proc_status]
+    call str_copy
+
+    ; Open status file
+    mov eax, SYS_OPENAT
+    mov edi, AT_FDCWD
+    lea rsi, [rbp-256]
+    xor edx, edx                ; O_RDONLY
+    xor r10d, r10d
+    syscall
+
+    test rax, rax
+    js .check_proc_next_entry   ; Failed to open status file
+
+    mov r13, rax                ; Save status fd
+
+    ; Read status file (first 256 bytes should be enough)
+    mov eax, SYS_READ
+    mov edi, r13d
+    lea rsi, [rbp-384]          ; status buffer
+    mov edx, 128
+    syscall
+
+    mov [rbp-32], rax           ; Save bytes read
+
+    ; Close status file
+    mov eax, SYS_CLOSE
+    mov edi, r13d
+    syscall
+
+    cmp qword [rbp-32], 0
+    jle .check_proc_next_entry
+
+    ; Search for "Name:\ttest\n" in status buffer
+    lea rdi, [rbp-384]
+    mov rsi, [rbp-32]           ; bytes read
+    lea rdx, [rel proc_test.string]
+    mov rcx, proc_test.len
+    call search_substring
+
+    test rax, rax
+    jz .check_proc_next_entry
+
+    ; Found "test" process!
+    mov r15, 1
+    jmp .check_proc_close
+
+.check_proc_next_entry:
+    mov rax, [rbp-16]
+    add rax, [rbp-24]
+    mov [rbp-16], rax
+    jmp .check_proc_process_entry
+
+.check_proc_close:
+    mov eax, SYS_CLOSE
+    mov edi, r12d
+    syscall
+
+.check_proc_done:
+    mov rax, r15                ; Return process found flag
+
+    pop rbx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    add rsp, 512
+    mov rsp, rbp
+    pop rbp
+    ret
+

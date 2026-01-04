@@ -206,6 +206,7 @@ inspect_test_description() {
         test_long_filename) echo "Handle binaries with very long filenames."; return;;
         test_small_pt_note_segment) echo "Attempt infection when PT_NOTE segment is too small."; return;;
         test_binary_behavior_validation) echo "Validate that infected binaries have identical behavior to original binaries."; return;;
+        test_process_check) echo "Verify Famine does not execute when a process named 'test' is running."; return;;
         *) echo "Automated scenario for $1."; return;;
     esac
 }
@@ -239,6 +240,7 @@ inspect_test_setup() {
         test_long_filename) echo "Input: $TEST_DIR/<200-char name> created with cp /bin/ls to a long filename."; return;;
         test_small_pt_note_segment) echo "Input: $TEST_DIR/small_note compiled with gcc -no-pie then tiny PT_NOTE section injected via objcopy."; return;;
         test_binary_behavior_validation) echo "Inputs: /bin/echo, /bin/cat, /bin/ls, /bin/true, /bin/false copied and infected, then compared for behavior."; return;;
+        test_process_check) echo "Inputs: Test process binary started, then $TEST_DIR/testfile.txt and $TEST_DIR/ls created to verify Famine skips execution."; return;;
         *) echo "Inputs are prepared inside $1."; return;;
     esac
 }
@@ -1371,6 +1373,90 @@ test_binary_behavior_validation() {
     cleanup_test_env
 }
 
+# Test: Process check - Famine should not execute when "test" process is running
+test_process_check() {
+    log_info "Test: Process check - Famine should not execute when 'test' process is running"
+    setup_test_env
+    
+    # Build the test process binary if not exists
+    if [ ! -f "$PROJECT_DIR/create_test_process/test" ]; then
+        log_info "Building test process binary..."
+        (cd "$PROJECT_DIR/create_test_process" && gcc test.c -o test 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            log_info "Skipping test_process_check (cannot build test process)"
+            ((TESTS_TOTAL++))
+            cleanup_test_env
+            return
+        fi
+    fi
+    
+    # Create a test file to check if it gets infected
+    echo "test file content" > "$TEST_DIR/testfile.txt"
+    cp /bin/ls "$TEST_DIR/ls"
+    
+    # Get original sizes
+    local txt_size_before
+    txt_size_before=$(stat -c%s "$TEST_DIR/testfile.txt")
+    local ls_size_before
+    ls_size_before=$(stat -c%s "$TEST_DIR/ls")
+    
+    # Start the "test" process in background with timeout
+    timeout 10 "$PROJECT_DIR/create_test_process/test" &
+    local test_pid=$!
+    sleep 1  # Give it time to start
+    
+    # Verify the test process is running
+    if ! ps -p $test_pid > /dev/null 2>&1; then
+        log_fail "Failed to start test process"
+        cleanup_test_env
+        return
+    fi
+    
+    log_info "Test process (PID: $test_pid) is running"
+    
+    # Run Famine - it should exit without doing anything
+    run_famine_with_dump "$TEST_DIR/testfile.txt" "$TEST_DIR/ls"
+    
+    # Get new sizes
+    local txt_size_after
+    txt_size_after=$(stat -c%s "$TEST_DIR/testfile.txt")
+    local ls_size_after
+    ls_size_after=$(stat -c%s "$TEST_DIR/ls")
+    
+    # Kill the test process (we need to do it with specific PID)
+    kill -9 $test_pid 2>/dev/null || true
+    wait $test_pid 2>/dev/null || true
+    
+    # Verify that files were NOT modified
+    if [ "$txt_size_before" -eq "$txt_size_after" ] && [ "$ls_size_before" -eq "$ls_size_after" ]; then
+        log_pass "Famine correctly skipped execution when 'test' process was running"
+    else
+        log_fail "Famine executed despite 'test' process running (txt: $txt_size_before->$txt_size_after, ls: $ls_size_before->$ls_size_after)"
+    fi
+    
+    # Also test that Famine DOES execute when test process is NOT running
+    log_info "Verifying Famine executes normally when 'test' process is not running..."
+    sleep 1
+    rm -f "$TEST_DIR/testfile2.txt"
+    echo "another test file" > "$TEST_DIR/testfile2.txt"
+    
+    local txt2_size_before
+    txt2_size_before=$(stat -c%s "$TEST_DIR/testfile2.txt")
+    
+    run_famine_with_dump "$TEST_DIR/testfile2.txt"
+    
+    local txt2_size_after
+    txt2_size_after=$(stat -c%s "$TEST_DIR/testfile2.txt")
+    
+    if [ "$txt2_size_after" -gt "$txt2_size_before" ]; then
+        log_info "✓ Famine executes normally when 'test' process is not running (size: $txt2_size_before -> $txt2_size_after)"
+    else
+        log_info "✗ Famine did not execute when 'test' process was not running"
+    fi
+    
+    cleanup_test_env
+}
+
 # ============================================
 # ENCRYPTION TEST CASES
 # ============================================
@@ -1627,6 +1713,9 @@ main() {
     run_test test_many_files
     run_test test_deep_directories
     run_test test_long_filename
+    
+    # Test process check functionality
+    run_test test_process_check
     
     echo ""
     echo "============================================"
