@@ -317,7 +317,7 @@ v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 v_signature_len:  equ $ - v_signature - 1
 
 ; ============================================
-; virus_str_copy - Copy string (position independent)
+; virus_str_copy - Copy string avec adresses relatives
 ; rdi = destination
 ; rsi = source
 ; ============================================
@@ -332,7 +332,7 @@ virus_str_copy:
     ret
 
 ; ============================================
-; virus_str_len - Get string length
+; virus_str_len - Get string length avec adresses relatives
 ; rdi = string pointer
 ; Returns: rax = length
 ; ============================================

