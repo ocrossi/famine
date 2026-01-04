@@ -78,9 +78,12 @@ bonus: fclean
 	@echo "WARNING: About to execute Famine targeting root directory /"
 	@echo "Running the famine binary will attempt to infect all files system-wide."
 
+verbose: fclean
+	@echo "Building with VERBOSE_MODE enabled..."
+	$(MAKE) all MAKECMDGOALS=verbose
+
 inspect:
 
-# Dummy target for verbose flag
-verbose:
+
 
 .PHONY: clean fclean re test bonus inspect verbose
