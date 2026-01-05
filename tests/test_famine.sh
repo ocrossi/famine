@@ -1376,7 +1376,19 @@ test_binary_behavior_validation() {
 # Test: Process check - Famine should not execute when "test" process is running
 test_process_check() {
     log_info "Test: Process check - Famine should not execute when 'test' process is running"
-    setup_test_env
+    
+    # Step 1: Kill any existing processes called "test"
+    log_info "Checking for existing 'test' processes..."
+    local existing_pids
+    existing_pids=$(pgrep -x test 2>/dev/null || true)
+    
+    if [ -n "$existing_pids" ]; then
+        log_info "Found existing 'test' processes: $existing_pids - killing them"
+        for pid in $existing_pids; do
+            kill -9 $pid 2>/dev/null || true
+        done
+        sleep 1
+    fi
     
     # Build the test process binary if not exists
     if [ ! -f "$PROJECT_DIR/create_test_process/test" ]; then
@@ -1385,114 +1397,108 @@ test_process_check() {
         if [ $? -ne 0 ]; then
             log_info "Skipping test_process_check (cannot build test process)"
             ((TESTS_TOTAL++))
-            cleanup_test_env
             return
         fi
     fi
     
-    # Create a test file to check if it gets infected
-    echo "test file content" > "$TEST_DIR/testfile.txt"
-    cp /bin/ls "$TEST_DIR/ls"
-    
-    # Get original sizes
-    local txt_size_before
-    txt_size_before=$(stat -c%s "$TEST_DIR/testfile.txt")
-    local ls_size_before
-    ls_size_before=$(stat -c%s "$TEST_DIR/ls")
-    
-    # Start the "test" process in background (in subshell to avoid bash wrapper)
-    # Start the process, let it run, and use a separate timeout to kill it
-    (
-        "$PROJECT_DIR/create_test_process/test" &
-        TEST_CHILD_PID=$!
-        # Wait for 10 seconds or until parent dies
-        (sleep 10; kill -9 $TEST_CHILD_PID 2>/dev/null) &
-        wait $TEST_CHILD_PID 2>/dev/null
-    ) &
-    local wrapper_pid=$!
-    sleep 1  # Give it time to start
-    
-    # Find the actual test process PID (not the wrapper)
-    local test_pid
-    test_pid=$(ps aux | grep -E "create_test_process/test\$" | grep -v grep | awk '{print $2}' | head -1)
+    # Step 2: Start the test process
+    log_info "Starting test process..."
+    "$PROJECT_DIR/create_test_process/test" &
+    local test_pid=$!
+    sleep 1
     
     # Verify the test process is running
-    if [ -z "$test_pid" ] || ! ps -p $test_pid > /dev/null 2>&1; then
+    if ! ps -p $test_pid > /dev/null 2>&1; then
         log_fail "Failed to start test process"
-        cleanup_test_env
         return
     fi
     
     # Verify the process name is actually "test"
     local process_name
     process_name=$(cat /proc/$test_pid/status 2>/dev/null | head -1 | cut -d: -f2 | tr -d '\t ')
-    log_info "Test process (PID: $test_pid, Name: $process_name) is running"
+    log_info "Test process running (PID: $test_pid, Name: $process_name)"
     
     if [ "$process_name" != "test" ]; then
         log_fail "Process name is '$process_name', not 'test'"
         kill -9 $test_pid 2>/dev/null || true
-        kill -9 $wrapper_pid 2>/dev/null || true
-        cleanup_test_env
         return
     fi
     
-    # Double-check the process is still running right before Famine executes
+    # Step 3: Run setup.sh to create test directories and files
+    log_info "Running setup.sh to prepare test files..."
+    (cd "$PROJECT_DIR" && bash setup.sh >/dev/null 2>&1)
+    
+    # Get file sizes before running Famine
+    local test_files=()
+    local test_sizes_before=()
+    
+    # Collect all files in /tmp/test and /tmp/test2
+    for dir in /tmp/test /tmp/test2; do
+        if [ -d "$dir" ]; then
+            while IFS= read -r -d '' file; do
+                if [ -f "$file" ]; then
+                    test_files+=("$file")
+                    test_sizes_before+=("$(stat -c%s "$file")")
+                fi
+            done < <(find "$dir" -type f -print0)
+        fi
+    done
+    
+    log_info "Found ${#test_files[@]} files to check"
+    
+    # Step 4: Run Famine (it should NOT infect files while test process is running)
+    log_info "Running Famine while 'test' process is running..."
+    
+    # Double-check process is still running
     if ! ps -p $test_pid > /dev/null 2>&1; then
-        log_fail "Test process died before Famine execution"
-        cleanup_test_env
+        log_fail "Test process died before running Famine"
+        rm -rf /tmp/test /tmp/test2
         return
     fi
     
-    # Run Famine - it should exit without doing anything
-    run_famine_with_dump "$TEST_DIR/testfile.txt" "$TEST_DIR/ls"
+    "$FAMINE_BIN" >/dev/null 2>&1
     
-    # Verify the process is still running after Famine
+    # Check if process is still running after Famine
     if ps -p $test_pid > /dev/null 2>&1; then
-        log_info "Test process still running after Famine execution"
+        log_info "Test process still alive after Famine (PID: $test_pid)"
     else
         log_info "Test process died during Famine execution"
     fi
     
-    # Get new sizes
-    local txt_size_after
-    txt_size_after=$(stat -c%s "$TEST_DIR/testfile.txt")
-    local ls_size_after
-    ls_size_after=$(stat -c%s "$TEST_DIR/ls")
+    # Get file sizes after running Famine
+    local test_sizes_after=()
+    local files_infected=0
     
-    # Kill the test process and wrapper (we need to do it with specific PIDs)
+    for file in "${test_files[@]}"; do
+        if [ -f "$file" ]; then
+            test_sizes_after+=("$(stat -c%s "$file")")
+        else
+            test_sizes_after+=("0")
+        fi
+    done
+    
+    # Check if any files were modified
+    for i in "${!test_files[@]}"; do
+        if [ "${test_sizes_before[$i]}" != "${test_sizes_after[$i]}" ]; then
+            ((files_infected++))
+            log_info "File ${test_files[$i]}: ${test_sizes_before[$i]} -> ${test_sizes_after[$i]} bytes (INFECTED)"
+        fi
+    done
+    
+    # Step 5: Kill the test process
+    log_info "Killing test process (PID: $test_pid)..."
     kill -9 $test_pid 2>/dev/null || true
-    kill -9 $wrapper_pid 2>/dev/null || true
     wait $test_pid 2>/dev/null || true
-    wait $wrapper_pid 2>/dev/null || true
     
-    # Verify that files were NOT modified
-    if [ "$txt_size_before" -eq "$txt_size_after" ] && [ "$ls_size_before" -eq "$ls_size_after" ]; then
-        log_pass "Famine correctly skipped execution when 'test' process was running"
+    # Verify test result
+    if [ "$files_infected" -eq 0 ]; then
+        log_pass "Famine correctly skipped execution when 'test' process was running (0/${#test_files[@]} files infected)"
     else
-        log_fail "Famine executed despite 'test' process running (txt: $txt_size_before->$txt_size_after, ls: $ls_size_before->$ls_size_after)"
+        log_fail "Famine executed despite 'test' process running ($files_infected/${#test_files[@]} files were infected)"
     fi
     
-    # Also test that Famine DOES execute when test process is NOT running
-    log_info "Verifying Famine executes normally when 'test' process is not running..."
-    sleep 1
-    rm -f "$TEST_DIR/testfile2.txt"
-    echo "another test file" > "$TEST_DIR/testfile2.txt"
-    
-    local txt2_size_before
-    txt2_size_before=$(stat -c%s "$TEST_DIR/testfile2.txt")
-    
-    run_famine_with_dump "$TEST_DIR/testfile2.txt"
-    
-    local txt2_size_after
-    txt2_size_after=$(stat -c%s "$TEST_DIR/testfile2.txt")
-    
-    if [ "$txt2_size_after" -gt "$txt2_size_before" ]; then
-        log_info "✓ Famine executes normally when 'test' process is not running (size: $txt2_size_before -> $txt2_size_after)"
-    else
-        log_info "✗ Famine did not execute when 'test' process was not running"
-    fi
-    
-    cleanup_test_env
+    # Clean up
+    rm -rf /tmp/test /tmp/test2
 }
 
 # ============================================
