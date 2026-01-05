@@ -596,6 +596,88 @@ test_non_elf_text_file() {
     cleanup_test_env
 }
 
+# Test: Random signature suffix
+test_random_signature_suffix() {
+    log_info "Test: Random signature suffix validation"
+    setup_test_env
+    
+    # Create test files
+    echo "file1 content" > "$TEST_DIR/file1.txt"
+    echo "file2 content" > "$TEST_DIR/file2.txt"
+    
+    # Run Famine to infect first file
+    run_famine_with_dump "$TEST_DIR/file1.txt"
+    
+    # Extract the signature from file1
+    local sig1_full
+    sig1_full=$(tail -c 60 "$TEST_DIR/file1.txt" | strings | grep "^Famine version" | head -1)
+    
+    # Extract the random suffix (last 8 characters after the base signature)
+    local suffix1
+    suffix1=$(echo "$sig1_full" | tail -c 9 | head -c 8)
+    
+    # Run Famine again to infect second file
+    run_famine_with_dump "$TEST_DIR/file2.txt"
+    
+    # Extract the signature from file2
+    local sig2_full
+    sig2_full=$(tail -c 60 "$TEST_DIR/file2.txt" | strings | grep "^Famine version" | head -1)
+    
+    # Extract the random suffix from file2
+    local suffix2
+    suffix2=$(echo "$sig2_full" | tail -c 9 | head -c 8)
+    
+    # Verify both files have the base signature
+    if ! grep -q "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>" "$TEST_DIR/file1.txt"; then
+        log_fail "File1 does not have base signature"
+        cleanup_test_env
+        return
+    fi
+    
+    if ! grep -q "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>" "$TEST_DIR/file2.txt"; then
+        log_fail "File2 does not have base signature"
+        cleanup_test_env
+        return
+    fi
+    
+    # Verify suffixes exist and are 8 characters
+    if [ ${#suffix1} -ne 8 ]; then
+        log_fail "Suffix1 is not 8 characters (got ${#suffix1})"
+        cleanup_test_env
+        return
+    fi
+    
+    if [ ${#suffix2} -ne 8 ]; then
+        log_fail "Suffix2 is not 8 characters (got ${#suffix2})"
+        cleanup_test_env
+        return
+    fi
+    
+    # Verify suffixes are different
+    if [ "$suffix1" = "$suffix2" ]; then
+        log_fail "Random suffixes are identical: '$suffix1' == '$suffix2'"
+        cleanup_test_env
+        return
+    fi
+    
+    # Verify suffixes are alphanumeric
+    if ! echo "$suffix1" | grep -qE '^[a-zA-Z0-9]{8}$'; then
+        log_fail "Suffix1 is not alphanumeric: '$suffix1'"
+        cleanup_test_env
+        return
+    fi
+    
+    if ! echo "$suffix2" | grep -qE '^[a-zA-Z0-9]{8}$'; then
+        log_fail "Suffix2 is not alphanumeric: '$suffix2'"
+        cleanup_test_env
+        return
+    fi
+    
+    log_pass "Random signature suffix validated (suffix1: '$suffix1', suffix2: '$suffix2')"
+    
+    cleanup_test_env
+}
+
 # Test 8: Empty file
 test_empty_file() {
     log_info "Test: Empty file"
@@ -1739,6 +1821,7 @@ main() {
     run_test test_binary_behavior_validation
     run_test test_already_infected
     run_test test_non_elf_text_file
+    run_test test_random_signature_suffix
     run_test test_empty_file
     run_test test_binary_garbage
     run_test test_multiple_binaries

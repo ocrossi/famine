@@ -11,6 +11,7 @@
 %define SYS_EXIT        60
 %define SYS_PTRACE      101
 %define SYS_GETDENTS64  217
+%define SYS_GETRANDOM   318
 ; %define SYS_WAIT4       61
 ; %define SYS_FTRUNCATE   77
 ; %define SYS_GETDENTS    78
@@ -46,6 +47,7 @@
 %define PROCESS_PATH_LEN          100
 %define PROCESS_STATUS_READ_SIZE  20
 %define PATH_BUFF_SIZE            4096
+%define RANDOM_SUFFIX_LEN         8
 %define STDOUT                    1
 %define PT_LOAD_FILESZ            8192            ; Increased to fit virus code
 %define PT_LOAD_MEMSZ             8192            ; Increased to fit virus code

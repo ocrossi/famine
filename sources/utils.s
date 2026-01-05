@@ -284,3 +284,63 @@ check_process_running:
     pop rbp
     ret
 
+; ============================================
+; generate_random_suffix()
+; Generates 8 random alphanumeric characters
+; Stores result in random_suffix buffer in .bss section
+; Uses SYS_GETRANDOM syscall
+; ============================================
+generate_random_suffix:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push rcx
+    push rdx
+
+    ; Get random bytes
+    mov eax, SYS_GETRANDOM
+    lea rdi, [rel random_suffix]
+    mov esi, RANDOM_SUFFIX_LEN
+    xor edx, edx                ; flags = 0 (default)
+    syscall
+
+    ; Convert each byte to alphanumeric character
+    xor rcx, rcx
+.convert_loop:
+    cmp rcx, RANDOM_SUFFIX_LEN
+    jge .done
+
+    lea rsi, [rel random_suffix]
+    movzx eax, byte [rsi + rcx] ; Get random byte
+    xor rdx, rdx
+    mov ebx, 62                 ; 62 possible chars (0-9, A-Z, a-z)
+    div ebx                     ; rdx = eax % 62
+
+    ; Convert to character: 0-9 (0-9), 10-35 (A-Z), 36-61 (a-z)
+    cmp edx, 10
+    jl .digit
+    cmp edx, 36
+    jl .upper
+    ; lowercase
+    sub edx, 36
+    add edx, 'a'
+    jmp .store
+.upper:
+    sub edx, 10
+    add edx, 'A'
+    jmp .store
+.digit:
+    add edx, '0'
+.store:
+    mov byte [rsi + rcx], dl
+    inc rcx
+    jmp .convert_loop
+
+.done:
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rbp
+    ret
+
+

