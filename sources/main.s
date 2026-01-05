@@ -20,6 +20,11 @@ section .bss
     elf_phdr_buf:   resb ELF64_PHDR_SIZE * MAX_PHDRS  ; buffer for program headers
     sig_check_buf:  resb BUFFER_SIZE          ; buffer for checking signature
     virus_copy_buf: resb 16384                ; buffer for virus code to inject
+    
+    ; Buffers for process check
+    proc_dirent_buf: resb 512                 ; buffer for getdents64
+    proc_path_buf:   resb 256                 ; buffer for building /proc/[pid]/status path
+    proc_status_buf: resb 128                 ; buffer for reading status file
 
 section .data
     newline:              db 10               ; newline character

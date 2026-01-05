@@ -142,10 +142,9 @@ check_process_running:
     mov rbp, rsp
     push r12                    ; proc fd
     push r13                    ; status fd
-    push r14                    ; dirent buffer ptr
+    push r14                    ; bytes read
     push r15                    ; process found flag
-    push rbx
-    sub rsp, 512                ; Stack space for buffers (AFTER pushes)
+    push rbx                    ; current position
 
     xor r15, r15                ; process found flag = 0
 
@@ -163,30 +162,29 @@ check_process_running:
     mov r12, rax                ; Save /proc fd
 
 .check_proc_read_loop:
-    ; Read directory entries
+    ; Read directory entries into BSS buffer
     mov eax, SYS_GETDENTS64
     mov edi, r12d
-    lea rsi, [rsp]              ; Buffer at rsp (after stack allocation)
+    lea rsi, [rel proc_dirent_buf]
     mov edx, 512
     syscall
 
     test rax, rax
     jle .check_proc_close       ; EOF or error
 
-    mov [rbp-8], rax            ; Save bytes read
-    mov qword [rbp-16], 0       ; pos = 0
+    mov r14, rax                ; Save bytes read
+    xor rbx, rbx                ; pos = 0
 
 .check_proc_process_entry:
-    mov rax, [rbp-16]
-    cmp rax, [rbp-8]
+    cmp rbx, r14
     jge .check_proc_read_loop
 
-    lea rdi, [rsp]
-    add rdi, rax                ; dirent pointer
+    lea rdi, [rel proc_dirent_buf]
+    add rdi, rbx                ; dirent pointer
 
     ; Get d_reclen
     movzx ecx, word [rdi + 16]
-    mov [rbp-24], rcx
+    push rcx                    ; Save d_reclen
 
     ; Get d_name
     lea rsi, [rdi + 19]
@@ -194,28 +192,27 @@ check_process_running:
     ; Check if d_name is numeric (process directory)
     movzx eax, byte [rsi]
     cmp al, '0'
-    jb .check_proc_next_entry
+    jb .check_proc_next_entry_pop
     cmp al, '9'
-    ja .check_proc_next_entry
+    ja .check_proc_next_entry_pop
 
-    ; Build path: /proc/[pid]/status
-    lea rdi, [rsp+256]          ; path buffer
+    ; Build path: /proc/[pid]/status in BSS buffer
+    lea rdi, [rel proc_path_buf]
     lea rsi, [rel procdir]
     call str_copy               ; Copy "/proc/"
     
-    lea rdi, [rsp+256]
+    lea rdi, [rel proc_path_buf]
     mov rax, 6                  ; length of "/proc/"
     add rdi, rax
-    lea rsi, [rsp]
-    mov rax, [rbp-16]
-    add rsi, rax
+    lea rsi, [rel proc_dirent_buf]
+    add rsi, rbx
     add rsi, 19                 ; d_name
     call str_copy               ; Copy pid
     
     ; Append "/status"
-    lea rdi, [rsp+256]
+    lea rdi, [rel proc_path_buf]
     call str_len
-    lea rdi, [rsp+256]
+    lea rdi, [rel proc_path_buf]
     add rdi, rax
     lea rsi, [rel proc_status]
     call str_copy
@@ -223,51 +220,51 @@ check_process_running:
     ; Open status file
     mov eax, SYS_OPENAT
     mov edi, AT_FDCWD
-    lea rsi, [rsp+256]
+    lea rsi, [rel proc_path_buf]
     xor edx, edx                ; O_RDONLY
     xor r10d, r10d
     syscall
 
     test rax, rax
-    js .check_proc_next_entry   ; Failed to open status file
+    js .check_proc_next_entry_pop   ; Failed to open status file
 
     mov r13, rax                ; Save status fd
 
-    ; Read status file (first 256 bytes should be enough)
+    ; Read status file into BSS buffer
     mov eax, SYS_READ
     mov edi, r13d
-    lea rsi, [rsp+128]          ; status buffer
+    lea rsi, [rel proc_status_buf]
     mov edx, 128
     syscall
 
-    mov [rbp-32], rax           ; Save bytes read
+    push rax                    ; Save bytes read
 
     ; Close status file
     mov eax, SYS_CLOSE
     mov edi, r13d
     syscall
 
-    cmp qword [rbp-32], 0
-    jle .check_proc_next_entry
+    pop rsi                     ; Restore bytes read
+    test rsi, rsi
+    jle .check_proc_next_entry_pop
 
     ; Search for "Name:\ttest\n" in status buffer
-    lea rdi, [rsp+128]
-    mov rsi, [rbp-32]           ; bytes read
+    lea rdi, [rel proc_status_buf]
     lea rdx, [rel proc_test.string]
     mov rcx, proc_test.len
     call search_substring
 
     test rax, rax
-    jz .check_proc_next_entry
+    jz .check_proc_next_entry_pop
 
     ; Found "test" process!
     mov r15, 1
+    pop rcx                     ; Clean up d_reclen
     jmp .check_proc_close
 
-.check_proc_next_entry:
-    mov rax, [rbp-16]
-    add rax, [rbp-24]
-    mov [rbp-16], rax
+.check_proc_next_entry_pop:
+    pop rcx                     ; d_reclen
+    add rbx, rcx
     jmp .check_proc_process_entry
 
 .check_proc_close:
@@ -278,8 +275,7 @@ check_process_running:
 .check_proc_done:
     mov rax, r15                ; Return process found flag
 
-    add rsp, 512                ; Deallocate buffer first
-    pop rbx                     ; Then restore registers in reverse order
+    pop rbx
     pop r15
     pop r14
     pop r13
