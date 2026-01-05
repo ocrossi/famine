@@ -610,31 +610,31 @@ test_random_signature_suffix() {
     
     # Extract the signature from file1
     local sig1_full
-    sig1_full=$(tail -c 60 "$TEST_DIR/file1.txt" | strings | grep "^Famine version" | head -1)
+    sig1_full=$(tail -c 80 "$TEST_DIR/file1.txt" | strings | grep "^Famine version" | head -1)
     
-    # Extract the random suffix (last 8 characters after the base signature)
+    # Extract the random suffix (last 8 characters after " - ")
     local suffix1
-    suffix1=$(echo "$sig1_full" | tail -c 9)
+    suffix1=$(echo "$sig1_full" | sed 's/.* - //' | head -c 8)
     
     # Run Famine again to infect second file
     run_famine_with_dump "$TEST_DIR/file2.txt"
     
     # Extract the signature from file2
     local sig2_full
-    sig2_full=$(tail -c 60 "$TEST_DIR/file2.txt" | strings | grep "^Famine version" | head -1)
+    sig2_full=$(tail -c 80 "$TEST_DIR/file2.txt" | strings | grep "^Famine version" | head -1)
     
     # Extract the random suffix from file2
     local suffix2
-    suffix2=$(echo "$sig2_full" | tail -c 9)
+    suffix2=$(echo "$sig2_full" | sed 's/.* - //' | head -c 8)
     
     # Verify both files have the base signature
-    if ! grep -q "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>" "$TEST_DIR/file1.txt"; then
+    if ! grep -q "Famine version 1.0 (c)oded by - <ocrossi>-<elaignel> -" "$TEST_DIR/file1.txt"; then
         log_fail "File1 does not have base signature"
         cleanup_test_env
         return
     fi
     
-    if ! grep -q "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>" "$TEST_DIR/file2.txt"; then
+    if ! grep -q "Famine version 1.0 (c)oded by - <ocrossi>-<elaignel> -" "$TEST_DIR/file2.txt"; then
         log_fail "File2 does not have base signature"
         cleanup_test_env
         return

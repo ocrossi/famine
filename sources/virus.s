@@ -337,9 +337,10 @@ v_firstDir:       db "/tmp/test", 0
 %ifndef BONUS_MODE
 v_secondDir:      db "/tmp/test2", 0
 %endif
-v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>"
+v_signature:      db "Famine version 1.0 (c)oded by - <ocrossi>-<elaignel> - "
 v_signature_len:  equ $ - v_signature
 v_random_suffix:  times RANDOM_SUFFIX_LEN db 0  ; Stores generated random alphanumeric suffix
+v_suffix_term:    db 0                           ; Null terminator after random suffix
 v_proc_self_exe:  db "/proc/self/exe", 0
 v_procdir:        db "/proc/", 0
 v_proc_status:    db "/status", 0
