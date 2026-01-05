@@ -301,7 +301,7 @@ generate_random_suffix:
     mov eax, SYS_GETRANDOM
     lea rdi, [rel random_suffix]
     mov esi, RANDOM_SUFFIX_LEN
-    xor edx, edx                ; flags = 0 (default)
+    xor edx, edx                ; flags = 0 (use /dev/urandom, non-blocking)
     syscall
 
     ; Convert each byte to alphanumeric character

@@ -614,7 +614,7 @@ test_random_signature_suffix() {
     
     # Extract the random suffix (last 8 characters after the base signature)
     local suffix1
-    suffix1=$(echo "$sig1_full" | tail -c 9 | head -c 8)
+    suffix1=$(echo "$sig1_full" | tail -c 9)
     
     # Run Famine again to infect second file
     run_famine_with_dump "$TEST_DIR/file2.txt"
@@ -625,7 +625,7 @@ test_random_signature_suffix() {
     
     # Extract the random suffix from file2
     local suffix2
-    suffix2=$(echo "$sig2_full" | tail -c 9 | head -c 8)
+    suffix2=$(echo "$sig2_full" | tail -c 9)
     
     # Verify both files have the base signature
     if ! grep -q "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>" "$TEST_DIR/file1.txt"; then

